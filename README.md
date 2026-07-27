@@ -112,7 +112,7 @@ Rerun the same command after `git pull` to update an existing installation.
 
 | Purpose | Command |
 | --- | --- |
-| Open setup/account UI | `./gui.sh` or `mcbe-gdk-linux-gui` |
+| Open setup UI | `./gui.sh` or `mcbe-gdk-linux-gui` |
 | Package-to-Linux setup | `./easy-install.sh /path/to/mcbe-gdk-build.msixvc` |
 | Launch Minecraft | `mcbe-gdk-linux` |
 | Check Xbox account | `mcbe-gdk-linux-auth` |
