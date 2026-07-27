@@ -562,11 +562,11 @@ class Window(Adw.ApplicationWindow):
                     if line.startswith(
                         "Downloading the MCBE GDK compatibility engine"
                     ):
-                        self.install_stage = "Downloading engine…"
+                        self.install_stage = "Downloading runtime…"
                     elif line.startswith(
                         "Installing the MCBE GDK compatibility engine"
                     ):
-                        self.install_stage = "Installing engine…"
+                        self.install_stage = "Installing runtime…"
                     self.refresh_launch_state()
                 elif kind == "code":
                     self.show_code(event[1], event[2])
