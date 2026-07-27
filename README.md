@@ -116,7 +116,7 @@ Rerun the same command after `git pull` to update an existing installation.
 | Package-to-Linux setup | `./easy-install.sh /path/to/mcbe-gdk-build.msixvc` |
 | Launch Minecraft | `mcbe-gdk-linux` |
 | Check Xbox account | `mcbe-gdk-linux-auth` |
-| Sign in again | `mcbe-gdk-linux-login` |
+| Sign in | `mcbe-gdk-linux-login` |
 | Sign out | `mcbe-gdk-linux-logout` |
 | Remove launchers | `./uninstall.sh` |
 
