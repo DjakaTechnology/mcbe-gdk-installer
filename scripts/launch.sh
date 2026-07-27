@@ -155,12 +155,8 @@ fi
 cleanup_marker() {
   python3 "$RUNTIME" gpu-disarm "$gpu_token" >> "$LOG" 2>&1 || true
 }
-leave_marker() {
-  trap - EXIT HUP INT TERM
-  exit 130
-}
 trap cleanup_marker EXIT
-trap leave_marker HUP INT TERM
+trap 'trap - EXIT HUP INT TERM; exit 130' HUP INT TERM
 
 (cd "$CONTENT" && python3 "$UMU" "$GAME" "$@") >> "$LOG" 2>&1
 rc=$?
