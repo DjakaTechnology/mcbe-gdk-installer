@@ -5,7 +5,8 @@ Microsoft/Xbox authentication and Regolith/rgl addon exports.
 
 ## What it does
 
-- Accepts the original authorized build `.zip`
+- Accepts an authorized `.zip`, `.msixvc`, or `.msixv`
+- Provides a desktop UI for installation, account login, and launching
 - Stages and exports its licensed MSIXVC content through WinBoat
 - Installs an MCBE-compatible GDK-Proton xuser engine
 - Opens Microsoft device-code sign-in automatically when needed
@@ -19,9 +20,15 @@ Microsoft/Xbox authentication and Regolith/rgl addon exports.
 > decryption keys, or DRM bypasses. You must have authorized access to the
 > build and Microsoft GDK.
 
-Requires x86_64 Linux, Python 3 with `cryptography`, `curl`, `tar`,
-`sha256sum`, and `flock`. The installer attempts a user-local Python package
-install when `cryptography` is missing.
+Requires x86_64 Linux, Python 3 with Tk and `cryptography`, `curl`, `tar`,
+`sha256sum`, and `flock`. Install `qrencode` to show a QR code in the sign-in
+window; the URL and device code are always available.
+
+**CachyOS / Arch**
+
+```bash
+sudo pacman -S --needed tk python-cryptography qrencode curl tar unzip
+```
 
 ## Setup
 
@@ -35,16 +42,16 @@ and:
 
 See [WinBoat/MSIXVC setup](docs/DECRYPTION.md) if this is not already configured.
 
-### 2. Run the installer
+### 2. Open the setup UI
 
 ```bash
 git clone https://github.com/veedy-dev/mcbe-gdk-linux.git
 cd mcbe-gdk-linux
-
-./easy-install.sh "/path/to/Minecraft-release_Bedrock_GameCore_x64_Desktop.zip"
+./gui.sh
 ```
 
-The script extracts and stages the package, then waits for WinBoat.
+Choose the authorized `.zip`, `.msixvc`, or `.msixv`, then click **Install**.
+The UI stages the package and waits for WinBoat.
 
 ### 3. Complete the WinBoat step
 
@@ -55,17 +62,13 @@ In the WinBoat Windows desktop:
 3. Approve the Administrator prompt.
 4. Wait for the export to finish.
 
-Return to the Linux terminal. Installation continues automatically.
+Return to the Linux UI. Installation continues automatically.
 
-### 4. Launch
+### 4. Sign in and launch
 
-```bash
-mcbe-gdk-linux
-```
-
-The first launch opens your browser and shows a Microsoft device code. Sign in
-with the account authorized for the build. Later launches reuse and refresh the
-isolated session automatically.
+In the UI, click **Sign in**. Scan the QR code or open the displayed URL, then
+enter the Microsoft device code. Click **Launch Minecraft** when the account is
+connected.
 
 The game is also available as **MCBE GDK Linux** in compatible
 application launchers. Desktops that group XDG categories place it under
@@ -89,6 +92,12 @@ mcbe-gdk-linux-regolith-env --fish | source
 
 ## Manual install
 
+The terminal installer accepts a package directly:
+
+```bash
+./easy-install.sh "/path/to/Minecraft-package.msixvc"
+```
+
 If you already have a decrypted `Content` directory:
 
 ```bash
@@ -101,7 +110,8 @@ Rerun the same command after `git pull` to update an existing installation.
 
 | Purpose | Command |
 | --- | --- |
-| ZIP-to-Linux setup | `./easy-install.sh /path/to/mcbe-gdk-build.zip` |
+| Open setup/account UI | `./gui.sh` or `mcbe-gdk-linux-gui` |
+| Package-to-Linux setup | `./easy-install.sh /path/to/mcbe-gdk-build.msixvc` |
 | Launch Minecraft | `mcbe-gdk-linux` |
 | Check Xbox account | `mcbe-gdk-linux-auth` |
 | Sign in again | `mcbe-gdk-linux-login` |

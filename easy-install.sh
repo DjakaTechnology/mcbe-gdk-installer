@@ -6,7 +6,8 @@ STAGE="${MCBE_GDK_SETUP_DIR:-$HOME/MCBEGDKLinuxSetup}"
 
 usage() {
   cat <<USAGE
-Usage: $0 /path/to/Minecraft-mcbe-gdk-build.zip
+Usage: $0 /path/to/Minecraft-build.zip
+       $0 /path/to/Minecraft-package.msixvc
 
 Stages the authorized MSIXVC for a WinBoat guest, generates the Windows export
 helper, waits for the decrypted Content directory, then installs the Linux
@@ -16,8 +17,12 @@ USAGE
 }
 
 [[ $# -eq 1 ]] || { usage; exit 2; }
-ZIP="$(realpath "$1")"
-[[ -f "$ZIP" ]] || { echo "Build archive not found: $ZIP" >&2; exit 1; }
+PACKAGE="$(realpath "$1")"
+[[ -f "$PACKAGE" ]] || { echo "Build package not found: $PACKAGE" >&2; exit 1; }
+case "${PACKAGE,,}" in
+  *.zip|*.msixvc|*.msixv) ;;
+  *) echo "Expected a .zip, .msixvc, or .msixv package." >&2; exit 2 ;;
+esac
 for command in unzip grep sed find python3; do
   command -v "$command" >/dev/null || { echo "$command is required." >&2; exit 1; }
 done
@@ -36,20 +41,33 @@ if [[ -e "$STAGE" ]]; then
 fi
 mkdir -p "$STAGE/input" "$STAGE/output"
 
-mapfile -t MSIX_LIST < <(unzip -Z1 "$ZIP" | grep -Ei '\.msixvc$' || true)
-mapfile -t MANIFEST_LIST < <(unzip -Z1 "$ZIP" | grep -Ei 'appxmanifest\.xml$' || true)
-[[ ${#MSIX_LIST[@]} -eq 1 ]] || {
-  echo "Expected exactly one .msixvc in the archive; found ${#MSIX_LIST[@]}." >&2; exit 1;
-}
-[[ ${#MANIFEST_LIST[@]} -ge 1 ]] || {
-  echo "No AppxManifest XML was found in the archive." >&2; exit 1;
-}
-
 echo "Extracting the authorized package into the WinBoat exchange directory..."
-unzip -p "$ZIP" "${MSIX_LIST[0]}" > "$STAGE/input/MCBEGDK.msixvc"
-unzip -p "$ZIP" "${MANIFEST_LIST[0]}" > "$STAGE/input/AppxManifest.xml"
+case "${PACKAGE,,}" in
+  *.zip)
+    mapfile -t MSIX_LIST < <(unzip -Z1 "$PACKAGE" | grep -Ei '\.msixvc?$' || true)
+    mapfile -t MANIFEST_LIST < <(unzip -Z1 "$PACKAGE" | grep -Ei 'appxmanifest\.xml$' || true)
+    [[ ${#MSIX_LIST[@]} -eq 1 ]] || {
+      echo "Expected exactly one MSIXVC in the archive; found ${#MSIX_LIST[@]}." >&2
+      exit 1
+    }
+    unzip -p "$PACKAGE" "${MSIX_LIST[0]}" > "$STAGE/input/MCBEGDK.msixvc"
+    if [[ ${#MANIFEST_LIST[@]} -ge 1 ]]; then
+      unzip -p "$PACKAGE" "${MANIFEST_LIST[0]}" > "$STAGE/input/AppxManifest.xml"
+    fi
+    ;;
+  *.msixvc|*.msixv)
+    cp "$PACKAGE" "$STAGE/input/MCBEGDK.msixvc"
+    ;;
+  *)
+    echo "Expected a .zip, .msixvc, or .msixv package." >&2
+    exit 2
+    ;;
+esac
 
-MANIFEST_VERSION="$(grep -ioE '<Identity[^>]+Version="[^"]+"' "$STAGE/input/AppxManifest.xml" | head -1 | sed -E 's/.*Version="([^"]+)"/\1/' || true)"
+MANIFEST_VERSION=""
+if [[ -f "$STAGE/input/AppxManifest.xml" ]]; then
+  MANIFEST_VERSION="$(grep -ioE '<Identity[^>]+Version="[^"]+"' "$STAGE/input/AppxManifest.xml" | head -1 | sed -E 's/.*Version="([^"]+)"/\1/' || true)"
+fi
 VERSION="${MANIFEST_VERSION:-local}"
 # Minecraft encodes 1.26.32.2 as 1.26.3202.0 in the package manifest.
 if [[ "$VERSION" =~ ^([0-9]+)\.([0-9]+)\.([0-9]{2})([0-9]{2})\.0$ ]]; then
@@ -89,16 +107,18 @@ try {
     }
 
     $Msix = Get-ChildItem (Join-Path $Root "input") -Filter *.msixvc | Select-Object -First 1
-    $ManifestFile = Join-Path $Root "input\AppxManifest.xml"
     if (-not $Msix) { Fail "The staged MSIXVC file is missing." }
-    if (-not (Test-Path $ManifestFile)) { Fail "AppxManifest.xml is missing." }
-
-    [xml]$Manifest = Get-Content $ManifestFile
-    $IdentityName = [string]$Manifest.Package.Identity.Name
-    $AppNode = @($Manifest.Package.Applications.Application) | Select-Object -First 1
-    $AppId = [string]$AppNode.Id
-    if (-not $IdentityName) { Fail "Could not read the package identity from AppxManifest.xml." }
-    if (-not $AppId) { $AppId = "Game" }
+    $ManifestFile = Join-Path $Root "input\AppxManifest.xml"
+    $IdentityName = "Microsoft.MinecraftUWP"
+    $AppId = "Game"
+    if (Test-Path $ManifestFile) {
+        [xml]$Manifest = Get-Content $ManifestFile
+        if ($Manifest.Package.Identity.Name) {
+            $IdentityName = [string]$Manifest.Package.Identity.Name
+        }
+        $AppNode = @($Manifest.Package.Applications.Application) | Select-Object -First 1
+        if ($AppNode.Id) { $AppId = [string]$AppNode.Id }
+    }
 
     $WdApp = Get-Command wdapp.exe -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -First 1
     if (-not $WdApp) {

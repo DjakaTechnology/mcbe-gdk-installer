@@ -72,12 +72,12 @@ def _show_code(url: str, code: str) -> None:
     print(message, flush=True)
 
 
-def login() -> bool:
+def login(on_code=None) -> bool:
     if msa_signed_in():
         print(f"Already signed in{': ' + msa_gamertag() if msa_gamertag() else ''}.")
         return True
     auth = NativeAuth()
-    auth._flow(_show_code, None)  # Upstream synchronous device-code flow.
+    auth._flow(on_code or _show_code, None)  # Synchronous device-code flow.
     return msa_signed_in()
 
 

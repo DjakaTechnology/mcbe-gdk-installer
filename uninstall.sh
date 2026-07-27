@@ -2,6 +2,7 @@
 set -euo pipefail
 ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/games/mcbe-gdk-linux"
 rm -f "$HOME/.local/bin/mcbe-gdk-linux" \
+      "$HOME/.local/bin/mcbe-gdk-linux-gui" \
       "$HOME/.local/bin/mcbe-gdk-linux-auth" \
       "$HOME/.local/bin/mcbe-gdk-linux-login" \
       "$HOME/.local/bin/mcbe-gdk-linux-logout" \

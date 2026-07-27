@@ -74,9 +74,11 @@ tar -xzf "$TMP/$ENGINE_ASSET" -C "$ROOT/engine"
 rm -rf "$ROOT/lib/auth" "$ROOT/lib/bol"
 cp -a "$SCRIPT_DIR/auth" "$ROOT/lib/auth"
 install -m755 "$SCRIPT_DIR/scripts/runtime.py" "$ROOT/lib/runtime.py"
+install -m755 "$SCRIPT_DIR/scripts/gui.py" "$ROOT/lib/gui.py"
 install -m644 "$SCRIPT_DIR/auth/LICENSE" \
   "$ROOT/licenses/BedrockOnLinux-LICENSE"
 printf '%s\n' "$CONTENT" > "$ROOT/game-dir"
+printf '%s\n' "$SCRIPT_DIR" > "$ROOT/source-dir"
 ln -sfn "$CONTENT" "$ROOT/profile/content"
 
 ROOT_JSON="$(json_escape "$ROOT")"
@@ -96,6 +98,7 @@ cat > "$ROOT/profile/settings.json" <<JSON
 JSON
 
 install -m755 "$SCRIPT_DIR/scripts/launch.sh" "$BIN_DIR/mcbe-gdk-linux"
+install -m755 "$SCRIPT_DIR/scripts/gui-launch.sh" "$BIN_DIR/mcbe-gdk-linux-gui"
 install -m755 "$SCRIPT_DIR/scripts/auth.sh" "$BIN_DIR/mcbe-gdk-linux-auth"
 install -m755 "$SCRIPT_DIR/scripts/recover.sh" "$BIN_DIR/mcbe-gdk-linux-recover"
 install -m755 "$SCRIPT_DIR/scripts/rgl-env.sh" "$BIN_DIR/mcbe-gdk-linux-regolith-env"
@@ -112,7 +115,7 @@ cat > "$APPLICATIONS_DIR/mcbe-gdk-linux.desktop" <<EOF_DESKTOP
 Type=Application
 Name=MCBE GDK Linux
 Comment=Authorized Minecraft Bedrock GDK build using GDK-Proton
-Exec=$BIN_DIR/mcbe-gdk-linux
+Exec=$BIN_DIR/mcbe-gdk-linux-gui
 Icon=minecraft
 Terminal=false
 Categories=Game;
@@ -125,6 +128,6 @@ fi
 
 echo
 echo "Installed successfully."
-echo "Run: mcbe-gdk-linux"
+echo "Run: mcbe-gdk-linux-gui"
 echo "Microsoft/Xbox sign-in opens automatically when needed."
 echo "For Regolith/rgl: source <(mcbe-gdk-linux-regolith-env)"
