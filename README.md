@@ -15,7 +15,7 @@ Minecraft Bedrock GDK builds installer on Linux with working Xbox authentication
 - Opens Microsoft device-code sign-in automatically when needed
 - Launches through `umu`
 - Keeps its profile separate from other Minecraft installations
-- Installs a standard XDG desktop entry for desktop environments and app launchers
+- Installs XDG entries for the installer and Minecraft Bedrock
 
 > [!IMPORTANT]
 > This project does not include Minecraft files, credentials, licenses,

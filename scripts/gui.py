@@ -31,7 +31,12 @@ for path in (ROOT / "lib", TOOL_ROOT / "scripts", TOOL_ROOT):
     sys.path.insert(0, str(path))
 
 from auth.auth import msa_gamertag, msa_signed_in  # noqa: E402
-from removal import remove_minecraft, runtime_lock  # noqa: E402
+from removal import (  # noqa: E402
+    minecraft_launcher_pid,
+    remove_minecraft,
+    runtime_lock,
+    stop_minecraft,
+)
 from runtime import login, logout  # noqa: E402
 
 APP_ID = "io.github.veedydev.MCBEGDKInstaller"
@@ -68,6 +73,7 @@ class Window(Adw.ApplicationWindow):
         self.installing = False
         self.was_updating = False
         self.launch_process: subprocess.Popen | None = None
+        self.stopping = False
 
         toolbar = Adw.ToolbarView()
         toolbar.add_top_bar(Adw.HeaderBar())
@@ -160,13 +166,14 @@ class Window(Adw.ApplicationWindow):
             label="Launch", valign=Gtk.Align.CENTER
         )
         self.launch_button.add_css_class("suggested-action")
-        self.launch_button.connect("clicked", self.launch)
+        self.launch_button.connect("clicked", self.launch_action)
         launch_row.add_suffix(self.launch_button)
         launch_group.add(launch_row)
 
         self.refresh_install()
         self.refresh_account()
         GLib.timeout_add(100, self.poll)
+        GLib.timeout_add(500, self.refresh_launch_state)
 
     def toast(self, message: str) -> None:
         self.overlay.add_toast(Adw.Toast.new(message))
@@ -225,7 +232,7 @@ class Window(Adw.ApplicationWindow):
         else:
             self.install_button.add_css_class("suggested-action")
         self.install_button.set_sensitive(selected or installed)
-        self.launch_button.set_sensitive(installed)
+        self.refresh_launch_state()
         if installed:
             self.install_row.set_title("Installed")
             self.install_row.set_subtitle("Worlds and account data are kept.")
@@ -460,7 +467,20 @@ class Window(Adw.ApplicationWindow):
         except Exception as exc:
             self.error("Sign out failed", str(exc))
 
-    def launch(self, _button: Gtk.Button) -> None:
+    def launch_action(self, _button: Gtk.Button) -> None:
+        if minecraft_launcher_pid(ROOT):
+            self.stopping = True
+            self.refresh_launch_state()
+
+            def worker() -> None:
+                try:
+                    stop_minecraft(ROOT)
+                except Exception as exc:
+                    self.events.put(("error", f"Could not stop Minecraft: {exc}"))
+
+            threading.Thread(target=worker, daemon=True).start()
+            return
+
         launcher = shutil.which("mcbe-gdk-linux")
         if not launcher or not self.is_installed():
             self.error(APP_NAME, "Install the game first.")
@@ -468,24 +488,34 @@ class Window(Adw.ApplicationWindow):
         self.launch_button.set_label("Starting…")
         self.launch_button.set_sensitive(False)
         self.launch_process = subprocess.Popen([launcher], start_new_session=True)
-        GLib.timeout_add(500, self.poll_launch)
 
-    def poll_launch(self) -> bool:
-        if not self.launch_process:
-            return GLib.SOURCE_REMOVE
-        result = self.launch_process.poll()
-        if result is None:
-            self.launch_button.set_label("Running")
-            return GLib.SOURCE_CONTINUE
-        self.launch_process = None
-        self.launch_button.set_label("Launch")
-        self.launch_button.set_sensitive(self.is_installed())
-        if result:
-            self.error(
-                "Minecraft did not start",
-                f"Check {ROOT / 'profile/logs/desktop-launch.log'} for details.",
+    def refresh_launch_state(self) -> bool:
+        running = minecraft_launcher_pid(ROOT) is not None
+        result = self.launch_process.poll() if self.launch_process else None
+        if self.launch_process and result is not None:
+            self.launch_process = None
+            if result and not self.stopping and not running:
+                self.error(
+                    "Minecraft did not start",
+                    f"Check {ROOT / 'profile/logs/desktop-launch.log'} for details.",
+                )
+
+        self.launch_button.remove_css_class("suggested-action")
+        self.launch_button.remove_css_class("destructive-action")
+        if running:
+            self.launch_button.set_label("Stopping…" if self.stopping else "Stop")
+            self.launch_button.add_css_class("destructive-action")
+            self.launch_button.set_sensitive(not self.stopping)
+        else:
+            self.stopping = False
+            self.launch_button.set_label(
+                "Starting…" if self.launch_process else "Launch"
             )
-        return GLib.SOURCE_REMOVE
+            self.launch_button.add_css_class("suggested-action")
+            self.launch_button.set_sensitive(
+                self.is_installed() and self.launch_process is None
+            )
+        return GLib.SOURCE_CONTINUE
 
     def poll(self) -> bool:
         try:
@@ -537,6 +567,7 @@ class Window(Adw.ApplicationWindow):
                         self.error("Sign in failed", "Microsoft sign-in did not complete.")
                 elif kind == "error":
                     self.installing = False
+                    self.stopping = False
                     self.progress.set_visible(False)
                     if self.signin_dialog:
                         self.signin_dialog.close()

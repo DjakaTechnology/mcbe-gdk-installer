@@ -13,6 +13,7 @@ RUNTIME="$ROOT/lib/runtime.py"
 LOG="$BOL_HOME/logs/desktop-launch.log"
 CACHE="$BOL_HOME/graphics-cache"
 LOCK="$BOL_HOME/.desktop-launch.lock"
+PID_FILE="$BOL_HOME/.desktop-launch.pid"
 GPU_MARKER="$BOL_HOME/.gpu-launch-in-progress.json"
 RECOVER_CMD="mcbe-gdk-linux-recover"
 
@@ -54,6 +55,12 @@ if ! flock -n 9; then
     'Wait for the game window instead of clicking the launcher again.'
   exit 0
 fi
+cleanup_pid() {
+  [[ "$(cat "$PID_FILE" 2>/dev/null || true)" == "$$" ]] && rm -f "$PID_FILE"
+}
+printf '%s\n' "$$" > "$PID_FILE.$$"
+mv -f "$PID_FILE.$$" "$PID_FILE"
+trap cleanup_pid EXIT
 
 if [[ -f "$GPU_MARKER" ]]; then
   current_boot="$(cat /proc/sys/kernel/random/boot_id 2>/dev/null || true)"
@@ -158,12 +165,16 @@ fi
 cleanup_marker() {
   python3 "$RUNTIME" gpu-disarm "$gpu_token" >> "$LOG" 2>&1 || true
 }
-trap cleanup_marker EXIT
-trap 'trap - EXIT HUP INT TERM; exit 130' HUP INT TERM
+cleanup_launch() {
+  cleanup_marker
+  cleanup_pid
+}
+trap cleanup_launch EXIT
+trap 'exit 130' HUP INT TERM
 
 (cd "$CONTENT" && python3 "$UMU" "$GAME" "$@") >> "$LOG" 2>&1
 rc=$?
-cleanup_marker
+cleanup_launch
 trap - EXIT HUP INT TERM
 elapsed=$((SECONDS - start))
 printf '[%(%F %T)T] Launcher exited rc=%d elapsed=%ds\n' \

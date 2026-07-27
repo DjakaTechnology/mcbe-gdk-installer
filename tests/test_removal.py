@@ -1,9 +1,17 @@
 import fcntl
+import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
-from scripts.removal import LOCK_NAME, remove_minecraft, runtime_lock
+from scripts.removal import (
+    LOCK_NAME,
+    minecraft_launcher_pid,
+    remove_minecraft,
+    runtime_lock,
+    stop_minecraft,
+)
 
 
 class RemovalTest(unittest.TestCase):
@@ -80,6 +88,37 @@ class RemovalTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "setup action is running"):
                 with runtime_lock(self.root):
                     self.fail("lock unexpectedly acquired")
+
+    def test_running_launcher_is_detected_and_stopped(self):
+        launcher = Path(self.temp.name) / "mcbe-gdk-linux"
+        launcher.write_text(
+            """#!/bin/sh
+exec 9>"$1"
+flock -n 9 || exit 1
+printf '%s\n' "$$" > "$2"
+sleep 30
+"""
+        )
+        launcher.chmod(0o755)
+        lock = self.profile / LOCK_NAME
+        pid_file = self.profile / ".desktop-launch.pid"
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        process = subprocess.Popen(
+            [launcher, lock, pid_file],
+            start_new_session=True,
+        )
+        try:
+            for _ in range(50):
+                if minecraft_launcher_pid(self.root) == process.pid:
+                    break
+                time.sleep(0.02)
+            self.assertEqual(minecraft_launcher_pid(self.root), process.pid)
+            self.assertTrue(stop_minecraft(self.root))
+            process.wait(timeout=2)
+            self.assertIsNone(minecraft_launcher_pid(self.root))
+        finally:
+            if process.poll() is None:
+                process.kill()
 
 
 if __name__ == "__main__":

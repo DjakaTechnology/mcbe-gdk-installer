@@ -136,6 +136,20 @@ StartupNotify=true
 StartupWMClass=io.github.veedydev.MCBEGDKInstaller
 EOF_DESKTOP
 
+GAME_DESKTOP="$APPLICATIONS_DIR/io.github.veedydev.MinecraftBedrock.desktop"
+cat > "$GAME_DESKTOP" <<EOF_DESKTOP
+[Desktop Entry]
+Type=Application
+Name=Minecraft Bedrock
+Comment=Launch Minecraft Bedrock
+Exec=$BIN_DIR/mcbe-gdk-linux
+Icon=$ICON_VALUE
+Terminal=false
+Categories=Game;
+Keywords=Minecraft;Bedrock;Xbox;Game;
+StartupNotify=true
+EOF_DESKTOP
+
 if command -v update-desktop-database >/dev/null; then
   update-desktop-database "$APPLICATIONS_DIR" >/dev/null 2>&1 || true
 fi
