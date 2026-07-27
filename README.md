@@ -6,6 +6,9 @@
 
 Minecraft Bedrock GDK builds installer on Linux with working Xbox authentication.
 
+> Compatibility engine source and releases:
+> [mcbe-gdk-engine](https://github.com/veedy-dev/mcbe-gdk-engine).
+
 ## What it does
 
 - Accepts `.zip`, `.msixvc`, or `.msixv` packages
