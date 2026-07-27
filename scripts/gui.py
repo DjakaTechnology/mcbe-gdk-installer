@@ -551,7 +551,11 @@ class Application(Adw.Application):
 
 def main() -> None:
     configure_color_scheme()
-    raise SystemExit(Application().run(sys.argv))
+    try:
+        status = Application().run(sys.argv)
+    except KeyboardInterrupt:
+        status = 130
+    raise SystemExit(status)
 
 
 if __name__ == "__main__":
