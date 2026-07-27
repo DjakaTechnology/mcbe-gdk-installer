@@ -1,0 +1,15 @@
+# Never commit game packages, decrypted executables, profiles, or credentials.
+*.msix
+*.msixvc
+*.appx
+*.zip
+*.exe
+*.dll
+*.AppImage
+Content/
+compatdata/
+xbox-profile/
+engine/
+*.tar.gz
+*.sha256
+.env
