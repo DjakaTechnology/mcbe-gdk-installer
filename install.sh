@@ -112,8 +112,8 @@ MCBE_GDK_ROOT="$ROOT" BOL_HOME="$ROOT/profile" PYTHONPATH="$ROOT/lib" \
 
 ICON="$ROOT/mcbe-gdk-installer.png"
 ICON_VALUE="applications-games"
-if command -v magick >/dev/null && [[ -f "$CONTENT/minecraftIcon.ico" ]]; then
-  magick "$CONTENT/minecraftIcon.ico[0]" -resize 256x256 "$ICON"
+if [[ -f "$SCRIPT_DIR/assets/mcbe-gdk-installer.png" ]]; then
+  install -m644 "$SCRIPT_DIR/assets/mcbe-gdk-installer.png" "$ICON"
   ICON_VALUE="$ICON"
 fi
 

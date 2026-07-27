@@ -1,7 +1,10 @@
+<p align="center">
+  <img src="assets/mcbe-gdk-installer.png" width="128" alt="MCBE GDK Installer">
+</p>
+
 # MCBE GDK Installer
 
-Install and run an authorized Minecraft Bedrock GDK build on Linux with
-standalone Microsoft/Xbox authentication.
+Minecraft Bedrock GDK builds installer on Linux with working Xbox authentication.
 
 ## What it does
 
