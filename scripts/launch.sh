@@ -18,39 +18,39 @@ RECOVER_CMD="mcbe-gdk-linux-recover"
 
 notify() {
   if command -v notify-send >/dev/null 2>&1; then
-    notify-send --app-name='MCBE GDK Linux' --icon=minecraft \
+    notify-send --app-name='MCBE GDK Installer' --icon=minecraft \
       "$1" "$2" >/dev/null 2>&1 || true
   fi
 }
 
 [[ -f "$GAME" ]] || {
-  notify 'MCBE GDK Linux' \
+  notify 'MCBE GDK Installer' \
     'Minecraft.Windows.exe is missing; rerun install.sh.'
   exit 1
 }
 [[ -x "$ENGINE/proton" ]] || {
-  notify 'MCBE GDK Linux' \
+  notify 'MCBE GDK Installer' \
     'The compatibility engine is missing; rerun install.sh.'
   exit 1
 }
 [[ -f "$RUNTIME" ]] || {
-  notify 'MCBE GDK Linux' \
+  notify 'MCBE GDK Installer' \
     'The standalone runtime is missing; rerun install.sh.'
   exit 1
 }
 command -v python3 >/dev/null 2>&1 || {
-  notify 'MCBE GDK Linux' 'Python 3 is required.'
+  notify 'MCBE GDK Installer' 'Python 3 is required.'
   exit 1
 }
 command -v flock >/dev/null 2>&1 || {
-  notify 'MCBE GDK Linux' 'flock is required.'
+  notify 'MCBE GDK Installer' 'flock is required.'
   exit 1
 }
 
 mkdir -p "$BOL_HOME/logs" "$CACHE/vkd3d" "$CACHE/dxvk" "$CACHE/nvidia"
 exec 9>"$LOCK"
 if ! flock -n 9; then
-  notify 'MCBE GDK Linux is already starting or running' \
+  notify 'Minecraft is already starting or running' \
     'Wait for the game window instead of clicking the launcher again.'
   exit 0
 fi
@@ -67,13 +67,13 @@ if [[ -f "$GPU_MARKER" ]]; then
   )"
   if [[ "$marker_pid" =~ ^[0-9]+$ ]] &&
       kill -0 "$marker_pid" 2>/dev/null; then
-    notify 'MCBE GDK Linux is already running' \
+    notify 'Minecraft is already running' \
       'Close the existing game session before launching it again.'
   elif [[ -n "$current_boot" && "$marker_boot" == "$current_boot" ]]; then
-    notify 'MCBE GDK Linux needs one reboot' \
+    notify 'MCBE GDK Installer needs one reboot' \
       "A previous GPU session was interrupted. Reboot Linux, then run: $RECOVER_CMD"
   else
-    notify 'MCBE GDK Linux recovery required' \
+    notify 'MCBE GDK Installer recovery required' \
       "Run: $RECOVER_CMD"
   fi
   exit 3
@@ -91,11 +91,11 @@ export __GL_SHADER_DISK_CACHE_PATH="$CACHE/nvidia"
 export __GL_SHADER_DISK_CACHE_SIZE=1073741824
 
 if ! python3 "$RUNTIME" prepare "$CONTENT" >> "$LOG" 2>&1; then
-  notify 'MCBE GDK Linux sign-in/setup failed' "See $LOG"
+  notify 'MCBE GDK Installer sign-in/setup failed' "See $LOG"
   exit 1
 fi
 [[ -x "$UMU" ]] || {
-  notify 'MCBE GDK Linux' 'umu-launcher setup failed.'
+  notify 'MCBE GDK Installer' 'umu-launcher setup failed.'
   exit 1
 }
 
@@ -129,6 +129,9 @@ export WINEDLLOVERRIDES="cryptbase=n,b;vrclient=;vrclient_x64=;openvr_api=;wineo
 
 # Some GDK builds can expose a native assertion dialog during a Wine startup race.
 # Suppress the dialog/debug break without disabling addon or script debugging.
+options_dir="$BOL_HOME/compatdata/pfx/drive_c/users/steamuser/AppData/Roaming/Minecraft Bedrock/Users/Shared/games/com.mojang/minecraftpe"
+mkdir -p "$options_dir"
+touch "$options_dir/options.txt"
 while IFS= read -r -d '' options; do
   grep -q '^dev_assertions_debug_break:' "$options" && \
     sed -i 's/^dev_assertions_debug_break:.*/dev_assertions_debug_break:0/' "$options" || \
@@ -138,7 +141,7 @@ while IFS= read -r -d '' options; do
     printf 'dev_assertions_show_dialog:0\n' >> "$options"
 done < <(find "$BOL_HOME/compatdata" -type f -name options.txt -print0 2>/dev/null || true)
 
-notify 'Starting MCBE GDK Linux…' \
+notify 'Starting Minecraft Bedrock…' \
   'Xbox authentication can take several seconds. Only click once.'
 printf '\n[%(%F %T)T] Launch requested\n' -1 >> "$LOG"
 start=$SECONDS
@@ -149,7 +152,7 @@ if [[ "$gpu_output" == *$'\n'* ]]; then
   printf '%s\n' "${gpu_output%$'\n'*}" >> "$LOG"
 fi
 if [[ ! "$gpu_token" =~ ^[0-9a-f]{32}$ ]]; then
-  notify 'MCBE GDK Linux safety check failed' "See $LOG"
+  notify 'MCBE GDK Installer safety check failed' "See $LOG"
   exit 1
 fi
 cleanup_marker() {
@@ -167,8 +170,8 @@ printf '[%(%F %T)T] Launcher exited rc=%d elapsed=%ds\n' \
   -1 "$rc" "$elapsed" >> "$LOG"
 
 if (( rc != 0 )); then
-  notify 'MCBE GDK Linux failed to start' "See $LOG"
+  notify 'Minecraft Bedrock failed to start' "See $LOG"
 elif (( elapsed < 8 )); then
-  notify 'MCBE GDK Linux exited before opening' "See $LOG"
+  notify 'Minecraft Bedrock exited before opening' "See $LOG"
 fi
 exit "$rc"

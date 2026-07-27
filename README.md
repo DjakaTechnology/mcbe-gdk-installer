@@ -1,4 +1,4 @@
-# MCBE GDK Linux
+# MCBE GDK Installer
 
 Run an authorized Minecraft Bedrock GDK build on Linux with standalone
 Microsoft/Xbox authentication and Regolith/rgl addon exports.
@@ -7,7 +7,7 @@ Microsoft/Xbox authentication and Regolith/rgl addon exports.
 
 - Accepts an authorized `.zip`, `.msixvc`, or `.msixv`
 - Provides a desktop UI for installation, account login, and launching
-- Stages and exports its licensed MSIXVC content through WinBoat
+- Decrypts `/LT` test-crypted development packages entirely on Linux
 - Installs an MCBE-compatible GDK-Proton xuser engine
 - Opens Microsoft device-code sign-in automatically when needed
 - Launches directly through `umu` without the BedrockOnLinux AppImage
@@ -20,57 +20,41 @@ Microsoft/Xbox authentication and Regolith/rgl addon exports.
 > decryption keys, or DRM bypasses. You must have authorized access to the
 > build and Microsoft GDK.
 
-Requires x86_64 Linux, Python 3 with Tk and `cryptography`, `curl`, `tar`,
-`sha256sum`, and `flock`. Install `qrencode` to show a QR code in the sign-in
-window; the URL and device code are always available.
+Requires x86_64 Linux, GTK4, Libadwaita, Python 3 with PyGObject and
+`cryptography`, `curl`, `tar`, `unzip`, `7z`, `sha256sum`, and `flock`.
+Install `qrencode` to show a QR code; the URL and device code are always
+available.
 
 **CachyOS / Arch**
 
 ```bash
-sudo pacman -S --needed tk python-cryptography qrencode curl tar unzip
+sudo pacman -S --needed gtk4 libadwaita python-gobject python-cryptography qrencode curl tar unzip p7zip
 ```
 
 ## Setup
 
-### 1. Prepare WinBoat once
-
-Install [WinBoat](https://github.com/TibixDev/winboat), create its Windows guest,
-and:
-
-- share your Linux home directory with the guest;
-- install the Microsoft GDK inside the guest.
-
-See [WinBoat/MSIXVC setup](docs/DECRYPTION.md) if this is not already configured.
-
-### 2. Open the setup UI
+### 1. Open the setup UI
 
 ```bash
-git clone https://github.com/veedy-dev/mcbe-gdk-linux.git
-cd mcbe-gdk-linux
+git clone https://github.com/veedy-dev/mcbe-gdk-installer.git
+cd mcbe-gdk-installer
 ./gui.sh
 ```
 
 Choose the authorized `.zip`, `.msixvc`, or `.msixv`, then click **Install**.
-The UI stages the package and waits for WinBoat.
+The installer downloads its pinned tools, verifies their checksums, extracts the
+public GDK test key locally, decrypts the package, and installs it.
+The first run temporarily downloads the official Microsoft GDK archive.
+Installing a newer build replaces only the game files; the isolated account,
+worlds, and profile data are preserved.
 
-### 3. Complete the WinBoat step
-
-In the WinBoat Windows desktop:
-
-1. Open **Network → host.lan → MCBEGDKLinuxSetup**.
-2. Double-click **Run-MCBE-GDK-Setup.cmd**.
-3. Approve the Administrator prompt.
-4. Wait for the export to finish.
-
-Return to the Linux UI. Installation continues automatically.
-
-### 4. Sign in and launch
+### 2. Sign in and launch
 
 In the UI, click **Sign in**. Scan the QR code or open the displayed URL, then
 enter the Microsoft device code. Click **Launch Minecraft** when the account is
 connected.
 
-The game is also available as **MCBE GDK Linux** in compatible
+The app is also available as **MCBE GDK Installer** in compatible
 application launchers. Desktops that group XDG categories place it under
 **Games**; launchers used with Hyprland usually expose it through search.
 
@@ -92,7 +76,7 @@ mcbe-gdk-linux-regolith-env --fish | source
 
 ## Manual install
 
-The terminal installer accepts a package directly:
+The terminal installer performs the same native Linux setup:
 
 ```bash
 ./easy-install.sh "/path/to/Minecraft-package.msixvc"
@@ -121,7 +105,7 @@ Rerun the same command after `git pull` to update an existing installation.
 
 ## Documentation
 
-- [WinBoat and authorized MSIXVC export](docs/DECRYPTION.md)
+- [Native `/LT` package extraction](docs/DECRYPTION.md)
 - [Engine sources and provenance](docs/ENGINE.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 

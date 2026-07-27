@@ -2,13 +2,14 @@
 # SPDX-License-Identifier: MIT
 
 import json
+import os
 import stat
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
-from auth import auth
+from auth import auth, prefix
 
 
 _UPGRADED_SYSTEM_REG = b"""WINE REGISTRY Version 2
@@ -33,6 +34,25 @@ _UPGRADED_USER_REG = b"""WINE REGISTRY Version 2
 
 
 class WineGdkPrerequisiteTests(unittest.TestCase):
+    def test_bundled_engine_seeds_cryptbase_before_wineboot(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            pfx = root / "profile/compatdata/pfx"
+            engine = root / "engine/GDK-Proton-mcbe-gdk"
+            engine.mkdir(parents=True)
+            with mock.patch.dict(
+                    os.environ,
+                    {"MCBE_GDK_ROOT": str(root), "BOL_WINEPREFIX": ""}), \
+                    mock.patch.object(prefix, "PFX", pfx), \
+                    mock.patch.object(prefix, "proton_path",
+                                      return_value=engine), \
+                    mock.patch(
+                        "auth.fixups._install_cryptbase_in_prefix",
+                        return_value=True,
+                    ) as install:
+                self.assertTrue(prefix.seed_managed_bootstrap_cryptbase(pfx))
+            install.assert_called_once_with(pfx)
+
     def test_file_picker_registration_repairs_upgraded_prefix_idempotently(self):
         with tempfile.TemporaryDirectory() as td:
             prefix = Path(td) / "pfx"

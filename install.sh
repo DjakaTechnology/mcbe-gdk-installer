@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="veedy-dev/mcbe-gdk-linux"
+REPO="veedy-dev/mcbe-gdk-installer"
 RELEASE="v0.1.0"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ENGINE_ASSET="GDK-Proton-mcbe-gdk-native12.tar.gz"
@@ -110,20 +110,36 @@ ln -sfn "mcbe-gdk-linux-regolith-env" "$BIN_DIR/mcbe-gdk-linux-rgl-env"
 MCBE_GDK_ROOT="$ROOT" BOL_HOME="$ROOT/profile" PYTHONPATH="$ROOT/lib" \
   python3 "$ROOT/lib/runtime.py" ensure-umu
 
-cat > "$APPLICATIONS_DIR/mcbe-gdk-linux.desktop" <<EOF_DESKTOP
+ICON="$ROOT/mcbe-gdk-installer.png"
+ICON_VALUE="applications-games"
+if command -v magick >/dev/null && [[ -f "$CONTENT/minecraftIcon.ico" ]]; then
+  magick "$CONTENT/minecraftIcon.ico[0]" -resize 256x256 "$ICON"
+  ICON_VALUE="$ICON"
+fi
+
+rm -f "$APPLICATIONS_DIR/mcbe-gdk-linux.desktop"
+DESKTOP="$APPLICATIONS_DIR/io.github.veedydev.MCBEGDKInstaller.desktop"
+cat > "$DESKTOP" <<EOF_DESKTOP
 [Desktop Entry]
 Type=Application
-Name=MCBE GDK Linux
-Comment=Authorized Minecraft Bedrock GDK build using GDK-Proton
+Name=MCBE GDK Installer
+GenericName=Minecraft Bedrock GDK Installer
+Comment=Install, authenticate, and launch Minecraft Bedrock GDK builds on Linux
 Exec=$BIN_DIR/mcbe-gdk-linux-gui
-Icon=minecraft
+Icon=$ICON_VALUE
 Terminal=false
 Categories=Game;
-StartupNotify=false
+Keywords=Minecraft;Bedrock;GDK;Xbox;Installer;Linux;
+X-KDE-Keywords=minecraft,bedrock,gdk,xbox,installer
+StartupNotify=true
+StartupWMClass=io.github.veedydev.MCBEGDKInstaller
 EOF_DESKTOP
 
 if command -v update-desktop-database >/dev/null; then
   update-desktop-database "$APPLICATIONS_DIR" >/dev/null 2>&1 || true
+fi
+if command -v kbuildsycoca6 >/dev/null; then
+  kbuildsycoca6 --noincremental >/dev/null 2>&1 || true
 fi
 
 echo

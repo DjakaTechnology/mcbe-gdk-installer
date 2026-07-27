@@ -9,7 +9,7 @@ RUNTIME="$ROOT/lib/runtime.py"
 LOCK="$BOL_HOME/.desktop-launch.lock"
 
 [[ -f "$RUNTIME" ]] || {
-  echo "MCBE GDK Linux runtime is missing; rerun install.sh." >&2
+  echo "MCBE GDK Installer runtime is missing; rerun install.sh." >&2
   exit 1
 }
 

@@ -56,17 +56,17 @@ def _show_code(url: str, code: str) -> None:
         pass
     if shutil.which("kdialog"):
         subprocess.run(
-            ["kdialog", "--title", "MCBE GDK Linux", "--msgbox", message],
+            ["kdialog", "--title", "MCBE GDK Installer", "--msgbox", message],
             check=False,
         )
     elif shutil.which("zenity"):
         subprocess.run(
-            ["zenity", "--info", "--title=MCBE GDK Linux", f"--text={message}"],
+            ["zenity", "--info", "--title=MCBE GDK Installer", f"--text={message}"],
             check=False,
         )
     elif shutil.which("notify-send"):
         subprocess.run(
-            ["notify-send", "MCBE GDK Linux sign-in", message],
+            ["notify-send", "MCBE GDK Installer sign-in", message],
             check=False,
         )
     print(message, flush=True)

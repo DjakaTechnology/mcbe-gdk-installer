@@ -111,7 +111,7 @@ def prefix_operation_lock(operation="modify the Wine prefix"):
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             raise BolError(
-                f"Cannot {operation}: another MCBE GDK Linux setup, repair, "
+                f"Cannot {operation}: another MCBE GDK Installer setup, repair, "
                 "or game session is already in progress. Close Minecraft or "
                 "use 'Force stop Minecraft' before trying again."
             ) from exc
@@ -143,7 +143,7 @@ def shared_assets_lock(operation, exclusive):
         except BlockingIOError as exc:
             raise BolError(
                 f"Cannot {operation}: shared Minecraft files are in use by "
-                "another MCBE GDK Linux profile or are being updated."
+                "another MCBE GDK Installer profile or are being updated."
             ) from exc
         yield fd
     finally:
@@ -242,11 +242,9 @@ def prefix_ready(prefix: Path):
 def seed_managed_bootstrap_cryptbase(prefix: Path):
     """Install native cryptbase before managed-prefix services start.
 
-    GDK-Proton's advapi32 forwards SystemFunction036 to cryptbase.  With the
-    managed pure-WoW64 engine, forcing only Wine's builtin cryptbase during an
-    engine upgrade can leave that forward unresolved and make every wineboot
-    service repeatedly abort.  Never materialise or modify an explicitly
-    supplied prefix or a prefix used with a custom engine.
+    GDK-Proton's advapi32 forwards SystemFunction036 to cryptbase.  Without a
+    native cryptbase, every wineboot service repeatedly aborts.  Only modify
+    this application's managed prefix and its verified bundled engine.
     """
     if os.environ.get("BOL_WINEPREFIX", "").strip():
         return False
@@ -254,10 +252,15 @@ def seed_managed_bootstrap_cryptbase(prefix: Path):
     engine = proton_path()
     if engine is None:
         return False
+    bundled_engine = Path(
+        os.environ.get("MCBE_GDK_ROOT", "")
+    ) / "engine/GDK-Proton-mcbe-gdk"
     try:
+        allowed_engines = {WINEGDK_OUT.resolve(strict=False)}
+        if os.environ.get("MCBE_GDK_ROOT", ""):
+            allowed_engines.add(bundled_engine.resolve(strict=False))
         if pfx.resolve(strict=False) != PFX.resolve(strict=False) or \
-                Path(engine).resolve(strict=False) != \
-                WINEGDK_OUT.resolve(strict=False):
+                Path(engine).resolve(strict=False) not in allowed_engines:
             return False
     except (OSError, RuntimeError):
         return False
@@ -332,7 +335,7 @@ def boot_prefix(prefix=None):
                 if completed.returncode != 0:
                     failure = f"exited with status {completed.returncode}"
             if failure:
-                log.write(f"\nMCBE GDK Linux: wineboot {failure}.\n")
+                log.write(f"\nMCBE GDK Installer: wineboot {failure}.\n")
                 log.flush()
     except OSError as exc:
         failure = (f"could not write its diagnostic log "
@@ -558,10 +561,10 @@ def kill_wine():
     """Explicit GUI action: stop only this application's Wine prefix."""
     stopped, forced = stop_prefix_procs(active_prefix())
     if stopped:
-        ok(f"Stopped {stopped} MCBE GDK Linux process(es)"
+        ok(f"Stopped {stopped} MCBE GDK Installer process(es)"
            + (f" ({forced} forced)." if forced else "."))
     else:
-        info("No MCBE GDK Linux Wine process is running.")
+        info("No MCBE GDK Installer Wine process is running.")
 
 
 def reset_prefix():

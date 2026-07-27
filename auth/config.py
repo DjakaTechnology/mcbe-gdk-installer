@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 
 APP = "mcbe-gdk-linux"
-PRETTY = "MCBE GDK Linux"
+PRETTY = "MCBE GDK Installer"
 VERSION = "2.1.1"
 
 HOME = Path.home()

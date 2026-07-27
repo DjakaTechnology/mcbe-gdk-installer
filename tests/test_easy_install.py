@@ -1,55 +1,76 @@
-"""Smoke test for staging a raw MSIXVC package."""
+"""Smoke test for the native /LT package path."""
 
 import os
 import subprocess
 import tempfile
-import time
 import unittest
 from pathlib import Path
 
 
-class RawPackageStagingTest(unittest.TestCase):
-    def test_raw_msixvc_is_staged_without_manifest(self):
+class NativePackageInstallTest(unittest.TestCase):
+    def test_test_crypted_msixvc_is_extracted_and_installed(self):
         repo = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             package = root / "build.msixvc"
             package.write_bytes(b"raw-msixvc")
-            stage = root / "stage"
-            process = subprocess.Popen(
+            xvd = root / "xvd"
+            xvd.mkdir()
+            tool = xvd / "XVDTool"
+            tool.write_text(
+                """#!/bin/sh
+case " $* " in
+  *" -i "*) echo "Test-crypted (/LT)"; echo "Encryption Key 0 GUID: 33ec8436-5a0e-4f0d-b1ce-3f29c3955039" ;;
+  *" -eu "*) for last; do :; done; while [ "$1" != "-o" ]; do shift; done; cp "$last" "$2" ;;
+  *" -xf "*) mkdir -p "$3"; printf MZ > "$3/Minecraft.Windows.exe" ;;
+esac
+"""
+            )
+            key_extractor = xvd / "DurangoKeyExtractor"
+            key_extractor.write_text("#!/bin/sh\nexit 0\n")
+            tool.chmod(0o755)
+            key_extractor.chmod(0o755)
+            dotnet = root / "dotnet"
+            hostfxr = dotnet / "host" / "fxr" / "8.0.29"
+            hostfxr.mkdir(parents=True)
+            (hostfxr / "libhostfxr.so").touch()
+            cik = root / "test.cik"
+            cik.write_bytes(b"test-key")
+            installer = root / "install"
+            installer.write_text(
+                '#!/bin/sh\n[ -f "$1/Minecraft.Windows.exe" ] && printf "%s" "$3" > "$HOME/version"\n'
+            )
+            installer.chmod(0o755)
+            installed = root / ".local/share/games/mcbe-gdk-linux"
+            game = installed / "game"
+            game.mkdir(parents=True)
+            (game / "Minecraft.Windows.exe").write_bytes(b"old")
+            world = installed / "profile/worlds/keep-me"
+            world.mkdir(parents=True)
+            (world / "level.dat").write_bytes(b"user-data")
+
+            subprocess.run(
                 [repo / "easy-install.sh", package],
                 cwd=repo,
                 env={
                     **os.environ,
-                    "MCBE_GDK_SETUP_DIR": str(stage),
+                    "HOME": str(root),
                     "MCBE_GDK_ROOT": str(root / "runtime"),
+                    "MCBE_GDK_XVD_DIR": str(xvd),
+                    "MCBE_GDK_DOTNET_ROOT": str(dotnet),
+                    "MCBE_GDK_CIK_FILE": str(cik),
+                    "MCBE_GDK_INSTALLER": str(installer),
                 },
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                check=True,
+                capture_output=True,
+                text=True,
             )
-            try:
-                helper = stage / "MCBEGDKExport.ps1"
-                for _ in range(100):
-                    if helper.exists():
-                        break
-                    if process.poll() is not None:
-                        self.fail("easy-install.sh exited before staging")
-                    time.sleep(0.05)
-                else:
-                    self.fail("easy-install.sh did not finish staging")
-
-                self.assertEqual(
-                    (stage / "input" / "MCBEGDK.msixvc").read_bytes(),
-                    package.read_bytes(),
-                )
-                self.assertFalse((stage / "input" / "AppxManifest.xml").exists())
-                self.assertIn("Microsoft.MinecraftUWP", helper.read_text())
-            finally:
-                process.terminate()
-                try:
-                    process.wait(timeout=2)
-                except subprocess.TimeoutExpired:
-                    process.kill()
+            self.assertEqual(
+                (root / ".local/share/games/mcbe-gdk-linux/game/Minecraft.Windows.exe").read_bytes(),
+                b"MZ",
+            )
+            self.assertEqual((world / "level.dat").read_bytes(), b"user-data")
+            self.assertEqual((root / "version").read_text(), "local")
 
 
 if __name__ == "__main__":

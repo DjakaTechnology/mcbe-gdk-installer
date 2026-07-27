@@ -9,6 +9,15 @@ from pathlib import Path
 
 
 class RuntimeSmokeTest(unittest.TestCase):
+    def test_gui_uses_the_installed_profile_for_auth(self):
+        gui = (
+            Path(__file__).resolve().parents[1] / "scripts" / "gui.py"
+        ).read_text(encoding="utf-8")
+        self.assertLess(
+            gui.index('os.environ["BOL_HOME"] = str(ROOT / "profile")'),
+            gui.index("from auth.auth import"),
+        )
+
     def test_fresh_profile_is_signed_out(self):
         repo = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmp:

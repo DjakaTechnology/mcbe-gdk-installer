@@ -699,7 +699,7 @@ def require_safe_graphics_session(
         warn("BOL_ALLOW_UNSAFE_GPU=1 bypasses the graphics safety block: "
              + problem + ".")
         return
-    die("Unsafe graphics session: " + problem + ". MCBE GDK Linux did not "
+    die("Unsafe graphics session: " + problem + ". MCBE GDK Installer did not "
         "start Wine, Vulkan, or Minecraft. Repair/reinstall the host GPU "
         "driver, ensure the desktop uses the hardware DRM provider, then "
         "reboot. Advanced override (at your own risk): "

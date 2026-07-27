@@ -2,18 +2,37 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-STAGE="${MCBE_GDK_SETUP_DIR:-$HOME/MCBEGDKLinuxSetup}"
+CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/mcbe-gdk-linux"
+
+XVD_VERSION="0.53.0.0"
+XVD_URL="https://github.com/emoose/xvdtool/releases/download/v0.53/XVDTool-${XVD_VERSION}-linux-x64.zip"
+XVD_SHA256="c3a992979fec2fa1d7d6adb2a5b3647617f79735fad551dd2bab008d873c1d98"
+DOTNET_VERSION="8.0.29"
+DOTNET_URL="https://builds.dotnet.microsoft.com/dotnet/Runtime/${DOTNET_VERSION}/dotnet-runtime-${DOTNET_VERSION}-linux-x64.tar.gz"
+DOTNET_SHA256="dba346c5c4357e1befebf14de8c8ee7f09313cc12c7c0015a4cdd4dfd0efba81"
+GDK_URL="https://github.com/microsoft/GDK/releases/download/April-2026-Update-2-v2604.2.7849/GDK_2604.2.7849.zip"
+GDK_SHA256="dcf28e26ebf442e16fff05ab869e37534abd85111c8bfd22401905d647688adb"
 
 usage() {
   cat <<USAGE
 Usage: $0 /path/to/Minecraft-build.zip
        $0 /path/to/Minecraft-package.msixvc
 
-Stages the authorized MSIXVC for a WinBoat guest, generates the Windows export
-helper, waits for the decrypted Content directory, then installs the Linux
-runtime. WinBoat must already be configured with the Linux home directory shared
-and the Microsoft GDK installed in its Windows guest.
+Decrypts and installs an authorized /LT test-crypted MCBE GDK package entirely
+on Linux. Retail or account-licensed MSIXVC packages are not supported.
 USAGE
+}
+
+download() {
+  local url="$1" output="$2" digest="$3"
+  mkdir -p "$(dirname "$output")"
+  if [[ -f "$output" ]] && echo "$digest  $output" | sha256sum -c - >/dev/null 2>&1; then
+    return
+  fi
+  echo "Downloading $(basename "$output")..."
+  curl -fL --retry 3 "$url" -o "$output.part"
+  echo "$digest  $output.part" | sha256sum -c -
+  mv "$output.part" "$output"
 }
 
 [[ $# -eq 1 ]] || { usage; exit 2; }
@@ -23,9 +42,10 @@ case "${PACKAGE,,}" in
   *.zip|*.msixvc|*.msixv) ;;
   *) echo "Expected a .zip, .msixvc, or .msixv package." >&2; exit 2 ;;
 esac
-for command in unzip grep sed find python3; do
+for command in curl tar unzip grep sed find python3 sha256sum 7z; do
   command -v "$command" >/dev/null || { echo "$command is required." >&2; exit 1; }
 done
+
 ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/games/mcbe-gdk-linux"
 MCBE_GDK_ROOT="$ROOT" BOL_HOME="$ROOT/profile" \
 PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}" \
@@ -34,14 +54,29 @@ PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}" \
     exit 1
   }
 
-if [[ -e "$STAGE" ]]; then
-  echo "Setup directory already exists: $STAGE" >&2
-  echo "Move or remove it after preserving anything you need, then rerun." >&2
-  exit 1
+if [[ -n "${MCBE_GDK_SETUP_DIR:-}" ]]; then
+  STAGE="$MCBE_GDK_SETUP_DIR"
+  [[ ! -e "$STAGE" ]] || { echo "Setup directory already exists: $STAGE" >&2; exit 1; }
+  mkdir -p "$STAGE"
+else
+  mkdir -p "$CACHE"
+  STAGE="$(mktemp -d "$CACHE/setup.XXXXXX")"
 fi
+GAME_BACKUP=""
+cleanup() {
+  local status=$?
+  trap - EXIT
+  if [[ -n "$GAME_BACKUP" && -e "$GAME_BACKUP" ]]; then
+    rm -rf "$ROOT/game"
+    mv "$GAME_BACKUP" "$ROOT/game"
+  fi
+  rm -rf "$STAGE"
+  exit "$status"
+}
+trap cleanup EXIT
 mkdir -p "$STAGE/input" "$STAGE/output"
 
-echo "Extracting the authorized package into the WinBoat exchange directory..."
+echo "Reading the package..."
 case "${PACKAGE,,}" in
   *.zip)
     mapfile -t MSIX_LIST < <(unzip -Z1 "$PACKAGE" | grep -Ei '\.msixvc?$' || true)
@@ -50,198 +85,110 @@ case "${PACKAGE,,}" in
       echo "Expected exactly one MSIXVC in the archive; found ${#MSIX_LIST[@]}." >&2
       exit 1
     }
-    unzip -p "$PACKAGE" "${MSIX_LIST[0]}" > "$STAGE/input/MCBEGDK.msixvc"
+    unzip -p "$PACKAGE" "${MSIX_LIST[0]}" > "$STAGE/input/package.msixvc"
     if [[ ${#MANIFEST_LIST[@]} -ge 1 ]]; then
       unzip -p "$PACKAGE" "${MANIFEST_LIST[0]}" > "$STAGE/input/AppxManifest.xml"
     fi
     ;;
   *.msixvc|*.msixv)
-    cp "$PACKAGE" "$STAGE/input/MCBEGDK.msixvc"
-    ;;
-  *)
-    echo "Expected a .zip, .msixvc, or .msixv package." >&2
-    exit 2
+    cp "$PACKAGE" "$STAGE/input/package.msixvc"
     ;;
 esac
 
-MANIFEST_VERSION=""
+VERSION="local"
 if [[ -f "$STAGE/input/AppxManifest.xml" ]]; then
-  MANIFEST_VERSION="$(grep -ioE '<Identity[^>]+Version="[^"]+"' "$STAGE/input/AppxManifest.xml" | head -1 | sed -E 's/.*Version="([^"]+)"/\1/' || true)"
+  VERSION="$(grep -ioE '<Identity[^>]+Version="[^"]+"' "$STAGE/input/AppxManifest.xml" |
+    head -1 | sed -E 's/.*Version="([^"]+)"/\1/' || true)"
 fi
-VERSION="${MANIFEST_VERSION:-local}"
-# Minecraft encodes 1.26.32.2 as 1.26.3202.0 in the package manifest.
+VERSION="${VERSION:-local}"
 if [[ "$VERSION" =~ ^([0-9]+)\.([0-9]+)\.([0-9]{2})([0-9]{2})\.0$ ]]; then
-  patch="${BASH_REMATCH[4]}"; patch="$((10#$patch))"
-  VERSION="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$((10#${BASH_REMATCH[3]})).${patch}"
+  VERSION="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$((10#${BASH_REMATCH[3]})).$((10#${BASH_REMATCH[4]}))"
 fi
-printf '%s\n' "$VERSION" > "$STAGE/version.txt"
 
-cat > "$STAGE/Run-MCBE-GDK-Setup.cmd" <<'CMD'
-@echo off
-setlocal
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0MCBEGDKExport.ps1"
-echo.
-echo Press any key to close this window.
-pause >nul
-CMD
+XVD_DIR="${MCBE_GDK_XVD_DIR:-$CACHE/xvdtool}"
+if [[ ! -x "$XVD_DIR/XVDTool" || ! -x "$XVD_DIR/DurangoKeyExtractor" ]]; then
+  download "$XVD_URL" "$CACHE/XVDTool-${XVD_VERSION}-linux-x64.zip" "$XVD_SHA256"
+  mkdir -p "$XVD_DIR"
+  unzip -oq "$CACHE/XVDTool-${XVD_VERSION}-linux-x64.zip" -d "$XVD_DIR"
+fi
 
-cat > "$STAGE/MCBEGDKExport.ps1" <<'POWERSHELL'
-$ErrorActionPreference = "Stop"
-$Root = $PSScriptRoot
-$Log = Join-Path $Root "mcbe-gdk-export.log"
-Start-Transcript -Path $Log -Force | Out-Null
+DOTNET_ROOT="${MCBE_GDK_DOTNET_ROOT:-$CACHE/dotnet}"
+if [[ ! -f "$DOTNET_ROOT/host/fxr/${DOTNET_VERSION}/libhostfxr.so" ]]; then
+  download "$DOTNET_URL" "$CACHE/dotnet-runtime-${DOTNET_VERSION}-linux-x64.tar.gz" "$DOTNET_SHA256"
+  mkdir -p "$DOTNET_ROOT"
+  tar -xzf "$CACHE/dotnet-runtime-${DOTNET_VERSION}-linux-x64.tar.gz" -C "$DOTNET_ROOT"
+fi
+export DOTNET_ROOT DOTNET_ROLL_FORWARD=Major
 
-function Fail([string]$Message) {
-    Write-Host "ERROR: $Message" -ForegroundColor Red
-    throw $Message
+INFO="$("$XVD_DIR/XVDTool" -i -nd -ne "$STAGE/input/package.msixvc" 2>&1)"
+if ! grep -qF "Test-crypted (/LT)" <<<"$INFO"; then
+  echo "This package is not /LT test-crypted." >&2
+  echo "Only authorized development packages using the public GDK test key can be processed on Linux." >&2
+  exit 1
+fi
+KEY_GUID="$(sed -nE 's/.*Encryption Key [0-9]+ GUID: ([0-9a-fA-F-]+).*/\1/p' <<<"$INFO" | head -1)"
+[[ "$KEY_GUID" =~ ^[0-9a-fA-F-]{36}$ ]] || {
+  echo "Could not determine the package encryption-key ID." >&2
+  exit 1
 }
 
-try {
-    $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-        Write-Host "Requesting Administrator privileges..."
-        Start-Process powershell.exe -Verb RunAs -Wait -ArgumentList @(
-            "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ('"' + $PSCommandPath + '"')
-        )
-        exit
-    }
-
-    $Msix = Get-ChildItem (Join-Path $Root "input") -Filter *.msixvc | Select-Object -First 1
-    if (-not $Msix) { Fail "The staged MSIXVC file is missing." }
-    $ManifestFile = Join-Path $Root "input\AppxManifest.xml"
-    $IdentityName = "Microsoft.MinecraftUWP"
-    $AppId = "Game"
-    if (Test-Path $ManifestFile) {
-        [xml]$Manifest = Get-Content $ManifestFile
-        if ($Manifest.Package.Identity.Name) {
-            $IdentityName = [string]$Manifest.Package.Identity.Name
-        }
-        $AppNode = @($Manifest.Package.Applications.Application) | Select-Object -First 1
-        if ($AppNode.Id) { $AppId = [string]$AppNode.Id }
-    }
-
-    $WdApp = Get-Command wdapp.exe -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -First 1
-    if (-not $WdApp) {
-        $Roots = @("${env:ProgramFiles(x86)}\Microsoft GDK", "$env:ProgramFiles\Microsoft GDK")
-        foreach ($SearchRoot in $Roots) {
-            if (Test-Path $SearchRoot) {
-                $WdApp = Get-ChildItem $SearchRoot -Filter wdapp.exe -File -Recurse -ErrorAction SilentlyContinue |
-                    Select-Object -ExpandProperty FullName -First 1
-                if ($WdApp) { break }
-            }
-        }
-    }
-    if (-not $WdApp) {
-        Fail "wdapp.exe was not found. Install the Microsoft GDK in this authorized WinBoat guest."
-    }
-
-    $DevModeKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock"
-    New-Item $DevModeKey -Force | Out-Null
-    New-ItemProperty $DevModeKey -Name AllowDevelopmentWithoutDevLicense -PropertyType DWord -Value 1 -Force | Out-Null
-
-    $LocalRoot = "C:\MCBEGDKLinuxSetup"
-    New-Item -ItemType Directory -Path $LocalRoot -Force | Out-Null
-    $LocalMsix = Join-Path $LocalRoot "MCBEGDK.msixvc"
-    Write-Host "Copying the package to the guest's local drive..." -ForegroundColor Cyan
-    Copy-Item $Msix.FullName $LocalMsix -Force
-
-    Write-Host "Installing the authorized MSIXVC with wdapp..." -ForegroundColor Cyan
-    & $WdApp install $LocalMsix
-    if ($LASTEXITCODE -ne 0) { Fail "wdapp install failed with exit code $LASTEXITCODE." }
-
-    $Package = Get-AppxPackage -Name $IdentityName -ErrorAction SilentlyContinue |
-        Sort-Object Version -Descending | Select-Object -First 1
-    if (-not $Package) {
-        $Package = Get-AppxPackage -AllUsers -Name $IdentityName -ErrorAction SilentlyContinue |
-            Sort-Object Version -Descending | Select-Object -First 1
-    }
-    if (-not $Package) { Fail "The installed package identity was not visible to Get-AppxPackage." }
-
-    $Candidates = @()
-    if ($Package.InstallLocation) { $Candidates += $Package.InstallLocation }
-    foreach ($Drive in Get-PSDrive -PSProvider FileSystem) {
-        $XboxGames = Join-Path $Drive.Root "XboxGames"
-        if (Test-Path $XboxGames) {
-            $Candidates += Get-ChildItem $XboxGames -Filter Minecraft.Windows.exe -File -Recurse -ErrorAction SilentlyContinue |
-                ForEach-Object { Split-Path (Split-Path $_.FullName -Parent) -Parent }
-        }
-    }
-    $GameDir = $Candidates | Where-Object {
-        Test-Path (Join-Path $_ "Content\Minecraft.Windows.exe")
-    } | Select-Object -First 1
-    if (-not $GameDir) { Fail "Could not locate the installed Content directory under the guest's XboxGames drives." }
-
-    $SourceContent = Join-Path $GameDir "Content"
-    $LocalExport = Join-Path $LocalRoot "Export"
-    New-Item -ItemType Directory -Path $LocalExport -Force | Out-Null
-    Set-Location $LocalExport
-
-    $SourceExe = Join-Path $SourceContent "Minecraft.Windows.exe"
-    $DecryptedExe = Join-Path $LocalExport "Minecraft.Windows.exe"
-    $EscapedSource = $SourceExe.Replace("'", "''")
-    $EscapedDest = $DecryptedExe.Replace("'", "''")
-
-    Write-Host "Exporting Minecraft.Windows.exe through the package identity..." -ForegroundColor Cyan
-    Invoke-CommandInDesktopPackage `
-        -PackageFamilyName $Package.PackageFamilyName `
-        -App $AppId `
-        -Command "powershell.exe" `
-        -Args "-NoProfile -Command Copy-Item '$EscapedSource' '$EscapedDest' -Force"
-    if (-not (Test-Path $DecryptedExe)) { Fail "The package-context executable export did not produce a file." }
-
-    $OutputContent = Join-Path $Root "output\Content"
-    if (Test-Path $OutputContent) { Remove-Item $OutputContent -Recurse -Force }
-    Write-Host "Copying the complete Content tree back to Linux..." -ForegroundColor Cyan
-    Copy-Item $SourceContent $OutputContent -Recurse -Force
-    Copy-Item $DecryptedExe (Join-Path $OutputContent "Minecraft.Windows.exe") -Force
-
-    $Ready = @{
-        packageFamily = $Package.PackageFamilyName
-        appId = $AppId
-        version = [string]$Package.Version
-        content = "output/Content"
-    } | ConvertTo-Json
-    Set-Content (Join-Path $Root "export-ready.json") $Ready -Encoding UTF8
-    Write-Host "Export complete. Return to the Linux terminal." -ForegroundColor Green
+CIK="${MCBE_GDK_CIK_FILE:-$CACHE/keys/Cik/$KEY_GUID.cik}"
+if [[ ! -f "$CIK" ]]; then
+  GDK_ZIP="$CACHE/GDK_2604.2.7849.zip"
+  GDK_DIR="$CACHE/gdk-2604.2.7849"
+  download "$GDK_URL" "$GDK_ZIP" "$GDK_SHA256"
+  mkdir -p "$GDK_DIR"
+  7z e -y -o"$GDK_DIR" "$GDK_ZIP" 'Installers/GamingServices.appxbundle' >/dev/null
+  X64_APPX="$(7z l -ba "$GDK_DIR/GamingServices.appxbundle" |
+    sed -nE 's#.* ([^ ]+_x64\.appx)$#\1#p' | head -1)"
+  [[ -n "$X64_APPX" ]] || { echo "Gaming Services x64 package was not found." >&2; exit 1; }
+  7z e -y -o"$GDK_DIR" "$GDK_DIR/GamingServices.appxbundle" "$X64_APPX" >/dev/null
+  mkdir -p "$GDK_DIR/x64" "$CACHE/keys"
+  7z x -y -o"$GDK_DIR/x64" "$GDK_DIR/$X64_APPX" >/dev/null
+  echo "Extracting the public GDK test key..."
+  for binary in \
+    "$GDK_DIR/x64/gamingservices.dll" \
+    "$GDK_DIR/x64/Microsoft.Xbox.Packaging.Native.dll" \
+    "$GDK_DIR/x64/drivers/xvdd.sys" \
+    "$GDK_DIR/x64/xvdstreamsvc.dll"; do
+    [[ -f "$binary" ]] &&
+      "$XVD_DIR/DurangoKeyExtractor" -o "$CACHE/keys" "$binary" >/dev/null || true
+  done
+fi
+[[ -f "$CIK" ]] || {
+  echo "The public GDK test key required by this package was not found." >&2
+  exit 1
 }
-catch {
-    Write-Host $_ -ForegroundColor Red
-    exit 1
-}
-finally {
-    Stop-Transcript -ErrorAction SilentlyContinue | Out-Null
-}
-POWERSHELL
+if [[ -n "${GDK_DIR:-}" ]]; then
+  rm -rf "$GDK_DIR"
+  rm -f "$GDK_ZIP"
+fi
 
-cat <<INSTRUCTIONS
-
-Build staged at:
-  $STAGE
-
-One WinBoat action is required because Microsoft licenses MSIXVC decryption to
-the Windows package identity:
-
-  1. Open the WinBoat Windows desktop.
-  2. In File Explorer, open Network > host.lan > MCBEGDKLinuxSetup.
-  3. Double-click Run-MCBE-GDK-Setup.cmd and approve the Administrator prompt.
-
-The helper installs the MSIXVC with wdapp, exports the executable through the
-registered package identity, and copies the complete Content tree back here.
-This Linux process will continue automatically when the export completes.
-INSTRUCTIONS
-
-printf '\nWaiting for WinBoat export'
-while [[ ! -f "$STAGE/export-ready.json" ]]; do
-  printf '.'
-  sleep 3
-done
-printf ' ready.\n\n'
-
+echo "Decrypting the test package..."
+"$XVD_DIR/XVDTool" -nd -cikfile "$CIK" \
+  -o "$STAGE/decrypted.msixvc" -eu "$STAGE/input/package.msixvc"
+echo "Extracting game content..."
+mkdir -p "$STAGE/output/Content"
+"$XVD_DIR/XVDTool" -nd -xf "$STAGE/output/Content" "$STAGE/decrypted.msixvc"
 [[ -f "$STAGE/output/Content/Minecraft.Windows.exe" ]] || {
-  echo "WinBoat reported completion, but Minecraft.Windows.exe is missing." >&2; exit 1;
+  echo "Extraction completed without Minecraft.Windows.exe." >&2
+  exit 1
 }
-"$SCRIPT_DIR/install.sh" "$STAGE/output/Content" --version "$VERSION"
 
+GAME_DIR="$ROOT/game"
+mkdir -p "$(dirname "$GAME_DIR")"
+NEW_GAME="$ROOT/.game-new-$$"
+mv "$STAGE/output/Content" "$NEW_GAME"
+if [[ -e "$GAME_DIR" ]]; then
+  GAME_BACKUP="$ROOT/.game-backup-$$"
+  echo "Updating the installed build; account, worlds, and profile data are preserved."
+  mv "$GAME_DIR" "$GAME_BACKUP"
+fi
+mv "$NEW_GAME" "$GAME_DIR"
+"${MCBE_GDK_INSTALLER:-$SCRIPT_DIR/install.sh}" "$GAME_DIR" --version "$VERSION"
+if [[ -n "$GAME_BACKUP" ]]; then
+  rm -rf "$GAME_BACKUP"
+  GAME_BACKUP=""
+fi
 echo
-echo "End-to-end setup complete. The staged package remains at: $STAGE"
-echo "After verifying the game, you may remove that directory to reclaim space."
+echo "End-to-end Linux setup complete."
