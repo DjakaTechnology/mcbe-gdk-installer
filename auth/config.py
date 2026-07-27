@@ -1,4 +1,4 @@
-"""bol.config — constants, paths, repos and URLs (no logic, no side effects)."""
+"""auth.config — constants, paths, repos and URLs (no logic, no side effects)."""
 # SPDX-License-Identifier: MIT
 
 import os

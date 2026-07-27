@@ -1,4 +1,4 @@
-"""bol.pe — PE parsing and byte-level binary patching."""
+"""auth.pe — PE parsing and byte-level binary patching."""
 # SPDX-License-Identifier: MIT
 
 import shutil

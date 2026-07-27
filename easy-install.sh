@@ -23,7 +23,7 @@ for command in unzip grep sed find python3; do
 done
 ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/games/mcbe-gdk-linux"
 MCBE_GDK_ROOT="$ROOT" BOL_HOME="$ROOT/profile" \
-PYTHONPATH="$SCRIPT_DIR/third_party/bedrock-on-linux${PYTHONPATH:+:$PYTHONPATH}" \
+PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}" \
   python3 "$SCRIPT_DIR/scripts/runtime.py" ensure-deps || {
     echo "Install python-cryptography with your distribution package manager." >&2
     exit 1

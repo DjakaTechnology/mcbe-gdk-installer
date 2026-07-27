@@ -1,4 +1,4 @@
-"""bol.prefix — Wine prefix and umu lifecycle: boot, kill, reset, options."""
+"""auth.prefix — Wine prefix and umu lifecycle: boot, kill, reset, options."""
 # SPDX-License-Identifier: MIT
 
 import hashlib

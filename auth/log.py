@@ -1,4 +1,4 @@
-"""bol.log — console logging, the BolError exception and die()."""
+"""auth.log — console logging, the BolError exception and die()."""
 # SPDX-License-Identifier: MIT
 
 import sys

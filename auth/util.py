@@ -1,4 +1,4 @@
-"""bol.util — small shared helpers: run, settings, HTTP, downloads, GitHub, screen/proc."""
+"""auth.util — small shared helpers: run, settings, HTTP, downloads, GitHub, screen/proc."""
 # SPDX-License-Identifier: MIT
 
 import http.client

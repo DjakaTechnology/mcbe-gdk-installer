@@ -1,4 +1,4 @@
-"""bol.fixups — in-prefix / in-game fixups (curl SSL, DLLs, OpenSSL XCurl, cryptbase, UI)."""
+"""auth.fixups — in-prefix / in-game fixups (curl SSL, DLLs, OpenSSL XCurl, cryptbase, UI)."""
 # SPDX-License-Identifier: MIT
 
 import hashlib

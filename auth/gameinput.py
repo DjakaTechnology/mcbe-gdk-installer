@@ -1,4 +1,4 @@
-"""bol.gameinput — Microsoft GameInput redistributable install (MSI/CAB extraction)."""
+"""auth.gameinput — Microsoft GameInput redistributable install (MSI/CAB extraction)."""
 # SPDX-License-Identifier: MIT
 
 import struct

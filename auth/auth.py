@@ -1,4 +1,4 @@
-"""bol.auth — Microsoft / Xbox Live native login (MSA + pre-auth chain)."""
+"""auth.auth — Microsoft / Xbox Live native login (MSA + pre-auth chain)."""
 # SPDX-License-Identifier: MIT
 
 import json

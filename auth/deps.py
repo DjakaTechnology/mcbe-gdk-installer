@@ -1,4 +1,4 @@
-"""bol.deps — runtime bootstrap of the non-stdlib Python deps login needs."""
+"""auth.deps — runtime bootstrap of the non-stdlib Python deps login needs."""
 # SPDX-License-Identifier: MIT
 import importlib
 import importlib.util

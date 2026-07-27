@@ -15,7 +15,7 @@ ROOT = Path(os.environ["MCBE_GDK_ROOT"]).expanduser().resolve()
 os.environ["BOL_HOME"] = str(ROOT / "profile")
 sys.path.insert(0, str(ROOT / "lib"))
 
-from bol.auth import (  # noqa: E402
+from auth.auth import (  # noqa: E402
     NativeAuth,
     msa_gamertag,
     msa_logout,
@@ -28,24 +28,24 @@ from bol.auth import (  # noqa: E402
     xbl_preauth,
     xbl_preauth_error_message,
 )
-from bol.config import WINEGDK_REG  # noqa: E402
-from bol.deps import ensure_login_deps  # noqa: E402
-from bol.fixups import (  # noqa: E402
+from auth.config import WINEGDK_REG  # noqa: E402
+from auth.deps import ensure_login_deps  # noqa: E402
+from auth.fixups import (  # noqa: E402
     _install_cryptbase_in_prefix,
     bump_stack_reserve,
     fix_curl_ssl,
     install_gdk_xbox_dlls,
 )
-from bol.gameinput import install_gameinput  # noqa: E402
-from bol.gpu_safety import (  # noqa: E402
+from auth.gameinput import install_gameinput  # noqa: E402
+from auth.gpu_safety import (  # noqa: E402
     acknowledge_gpu_safety_incident,
     arm_gpu_launch,
     disarm_gpu_launch,
     require_safe_graphics_session,
 )
-from bol.log import BolError, ok  # noqa: E402
-from bol.prefix import active_prefix, boot_prefix, ensure_umu, prefix_ready  # noqa: E402
-from bol.wine_registry import reg_delete, update_prefix_registry  # noqa: E402
+from auth.log import BolError, ok  # noqa: E402
+from auth.prefix import active_prefix, boot_prefix, ensure_umu, prefix_ready  # noqa: E402
+from auth.wine_registry import reg_delete, update_prefix_registry  # noqa: E402
 
 
 def _show_code(url: str, code: str) -> None:

@@ -44,7 +44,7 @@ mkdir -p \
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
 MCBE_GDK_ROOT="$ROOT" BOL_HOME="$ROOT/profile" \
-PYTHONPATH="$SCRIPT_DIR/third_party/bedrock-on-linux${PYTHONPATH:+:$PYTHONPATH}" \
+PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}" \
   python3 "$SCRIPT_DIR/scripts/runtime.py" ensure-deps || {
     echo "Install python-cryptography with your distribution package manager." >&2
     exit 1
@@ -71,10 +71,10 @@ curl -fL --retry 3 "$RELEASE_URL/$ENGINE_ASSET.sha256" -o "$TMP/$ENGINE_ASSET.sh
 rm -rf "$ROOT/engine/GDK-Proton-mcbe-gdk"
 tar -xzf "$TMP/$ENGINE_ASSET" -C "$ROOT/engine"
 
-rm -rf "$ROOT/lib/bol"
-cp -a "$SCRIPT_DIR/third_party/bedrock-on-linux/bol" "$ROOT/lib/bol"
+rm -rf "$ROOT/lib/auth" "$ROOT/lib/bol"
+cp -a "$SCRIPT_DIR/auth" "$ROOT/lib/auth"
 install -m755 "$SCRIPT_DIR/scripts/runtime.py" "$ROOT/lib/runtime.py"
-install -m644 "$SCRIPT_DIR/third_party/bedrock-on-linux/LICENSE" \
+install -m644 "$SCRIPT_DIR/auth/LICENSE" \
   "$ROOT/licenses/BedrockOnLinux-LICENSE"
 printf '%s\n' "$CONTENT" > "$ROOT/game-dir"
 ln -sfn "$CONTENT" "$ROOT/profile/content"

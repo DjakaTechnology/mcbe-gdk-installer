@@ -14,8 +14,8 @@ class RuntimeSmokeTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "lib").mkdir()
-            (root / "lib" / "bol").symlink_to(
-                repo / "third_party" / "bedrock-on-linux" / "bol",
+            (root / "lib" / "auth").symlink_to(
+                repo / "auth",
                 target_is_directory=True,
             )
             result = subprocess.run(
