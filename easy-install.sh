@@ -151,8 +151,10 @@ if [[ ! -f "$CIK" ]]; then
     "$GDK_DIR/x64/Microsoft.Xbox.Packaging.Native.dll" \
     "$GDK_DIR/x64/drivers/xvdd.sys" \
     "$GDK_DIR/x64/xvdstreamsvc.dll"; do
-    [[ -f "$binary" ]] &&
-      "$XVD_DIR/DurangoKeyExtractor" -o "$CACHE/keys" "$binary" >/dev/null || true
+    if [[ -f "$binary" ]]; then
+      "$XVD_DIR/DurangoKeyExtractor" \
+        -o "$CACHE/keys" "$binary" >/dev/null || true
+    fi
   done
 fi
 [[ -f "$CIK" ]] || {
