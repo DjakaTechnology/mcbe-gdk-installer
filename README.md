@@ -1,14 +1,15 @@
 # MCBE GDK Linux
 
-Run an authorized Minecraft Bedrock GDK build on Linux with Xbox
-authentication and Regolith/rgl addon exports.
+Run an authorized Minecraft Bedrock GDK build on Linux with standalone
+Microsoft/Xbox authentication and Regolith/rgl addon exports.
 
 ## What it does
 
 - Accepts the original authorized build `.zip`
 - Stages and exports its licensed MSIXVC content through WinBoat
 - Installs an MCBE-compatible GDK-Proton xuser engine
-- Handles Microsoft/Xbox device-code sign-in without another launcher
+- Opens Microsoft device-code sign-in automatically when needed
+- Launches directly through `umu` without the BedrockOnLinux AppImage
 - Keeps its profile separate from other Minecraft installations
 - Installs a standard XDG desktop entry for desktop environments and app launchers
 - Provides the correct `COM_MOJANG` path for Regolith and rgl
@@ -62,8 +63,9 @@ Return to the Linux terminal. Installation continues automatically.
 mcbe-gdk-linux
 ```
 
-The first launch opens Microsoft device-code sign-in automatically. Use the
-Microsoft account authorized for the build.
+The first launch opens your browser and shows a Microsoft device code. Sign in
+with the account authorized for the build. Later launches reuse and refresh the
+isolated session automatically.
 
 The game is also available as **MCBE GDK Linux** in compatible
 application launchers. Desktops that group XDG categories place it under
@@ -93,6 +95,8 @@ If you already have a decrypted `Content` directory:
 ./install.sh "/path/to/decrypted/Content" --version 1.26.32.2
 ```
 
+Rerun the same command after `git pull` to update an existing installation.
+
 ## Commands
 
 | Purpose | Command |
@@ -113,12 +117,11 @@ If you already have a decrypted `Content` directory:
 
 ## Engine source
 
-This repository contains the Linux setup tooling. The compatibility engine is
-built from public WineGDK sources pinned in
-[Engine sources and provenance](docs/ENGINE.md). The standalone authentication
-runtime vendors a pinned, MIT-licensed subset of
-[BedrockOnLinux](https://github.com/Wyze3306/BedrockOnLinux); it does not install
-or run the BedrockOnLinux launcher.
+The compatibility engine is built from pinned public WineGDK sources documented
+in [Engine sources and provenance](docs/ENGINE.md). Authentication and prefix
+setup use a pinned, MIT-licensed subset of
+[BedrockOnLinux](https://github.com/Wyze3306/BedrockOnLinux). Its launcher,
+AppImage, GUI, and game-management code are not installed.
 
 ## License
 
