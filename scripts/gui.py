@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import fcntl
 import os
 import queue
 import shutil
@@ -11,7 +10,6 @@ import subprocess
 import sys
 import tempfile
 import threading
-from contextlib import contextmanager
 from pathlib import Path
 
 try:
@@ -33,6 +31,7 @@ for path in (ROOT / "lib", TOOL_ROOT / "scripts", TOOL_ROOT):
     sys.path.insert(0, str(path))
 
 from auth.auth import msa_gamertag, msa_signed_in  # noqa: E402
+from removal import remove_minecraft, runtime_lock  # noqa: E402
 from runtime import login, logout  # noqa: E402
 
 APP_ID = "io.github.veedydev.MCBEGDKInstaller"
@@ -56,18 +55,6 @@ def configure_color_scheme() -> None:
         Adw.StyleManager.get_default().set_color_scheme(
             Adw.ColorScheme.PREFER_DARK
         )
-
-
-@contextmanager
-def runtime_lock():
-    path = ROOT / "profile" / ".desktop-launch.lock"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a+") as lock:
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            raise RuntimeError("Minecraft or another setup action is running.") from exc
-        yield
 
 
 class Window(Adw.ApplicationWindow):
@@ -259,27 +246,45 @@ class Window(Adw.ApplicationWindow):
     def confirm_uninstall(self) -> None:
         dialog = Adw.AlertDialog(
             heading="Uninstall Minecraft?",
-            body="Game files will be removed. Worlds and account data will be kept.",
+            body="Game files will be removed.",
         )
+        reset = Gtk.CheckButton(label="Remove user data")
+        extra = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        extra.append(reset)
+        detail = Gtk.Label(
+            label="Worlds, settings, and Microsoft/Xbox session",
+            xalign=0,
+        )
+        detail.add_css_class("dim-label")
+        extra.append(detail)
+        dialog.set_extra_child(extra)
         dialog.add_response("cancel", "Cancel")
         dialog.add_response("uninstall", "Uninstall")
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
         dialog.set_response_appearance(
             "uninstall", Adw.ResponseAppearance.DESTRUCTIVE
         )
-        dialog.connect("response", self.uninstall_response)
+        dialog.connect("response", self.uninstall_response, reset)
         dialog.present(self)
 
-    def uninstall_response(self, _dialog: Adw.AlertDialog, response: str) -> None:
+    def uninstall_response(
+        self,
+        _dialog: Adw.AlertDialog,
+        response: str,
+        reset: Gtk.CheckButton,
+    ) -> None:
         if response != "uninstall":
             return
+        remove_user_data = reset.get_active()
         self.install_button.set_sensitive(False)
         self.install_row.set_title("Uninstalling…")
 
         def worker() -> None:
             try:
-                with runtime_lock():
-                    shutil.rmtree(ROOT / "game")
-                self.events.put(("uninstall_done",))
+                with runtime_lock(ROOT):
+                    remove_minecraft(ROOT, remove_user_data)
+                self.events.put(("uninstall_done", remove_user_data))
             except Exception as exc:
                 self.events.put(("error", f"Uninstall failed: {exc}"))
 
@@ -310,7 +315,7 @@ class Window(Adw.ApplicationWindow):
 
         def worker() -> None:
             try:
-                with runtime_lock():
+                with runtime_lock(ROOT):
                     process = subprocess.Popen(
                         [str(installer), str(package.resolve())],
                         cwd=TOOL_ROOT,
@@ -359,7 +364,7 @@ class Window(Adw.ApplicationWindow):
 
         def worker() -> None:
             try:
-                with runtime_lock():
+                with runtime_lock(ROOT):
                     result = login(on_code)
                 self.events.put(("login_done", result))
             except Exception as exc:
@@ -448,7 +453,7 @@ class Window(Adw.ApplicationWindow):
         if response != "signout":
             return
         try:
-            with runtime_lock():
+            with runtime_lock(ROOT):
                 logout()
             self.refresh_account()
             self.toast("Microsoft account disconnected")
@@ -514,7 +519,12 @@ class Window(Adw.ApplicationWindow):
                         self.error("Installation failed", "Review the installation details.")
                 elif kind == "uninstall_done":
                     self.refresh_install()
-                    self.toast("Minecraft uninstalled")
+                    self.refresh_account()
+                    self.toast(
+                        "Minecraft and user data removed"
+                        if event[1]
+                        else "Minecraft uninstalled"
+                    )
                 elif kind == "login_done":
                     if self.signin_dialog:
                         self.signin_dialog.close()

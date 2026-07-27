@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="veedy-dev/mcbe-gdk-installer"
-RELEASE="v0.1.0"
+ENGINE_REPO="veedy-dev/mcbe-gdk-engine"
+ENGINE_RELEASE="v0.1.0"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-ENGINE_ASSET="GDK-Proton-mcbe-gdk-native12.tar.gz"
+ENGINE_ASSET="GDK-Proton-mcbe-gdk-${ENGINE_RELEASE}.tar.gz"
 ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/games/mcbe-gdk-linux"
 BIN_DIR="$HOME/.local/bin"
 APPLICATIONS_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
@@ -64,7 +64,7 @@ if [[ -f "$CONTENT/Microsoft.WindowsAppRuntime.Bootstrap.dll" ]]; then
 fi
 
 echo "Downloading the MCBE GDK compatibility engine..."
-RELEASE_URL="https://github.com/$REPO/releases/download/$RELEASE"
+RELEASE_URL="https://github.com/$ENGINE_REPO/releases/download/$ENGINE_RELEASE"
 curl -fL --retry 3 "$RELEASE_URL/$ENGINE_ASSET" -o "$TMP/$ENGINE_ASSET"
 curl -fL --retry 3 "$RELEASE_URL/$ENGINE_ASSET.sha256" -o "$TMP/$ENGINE_ASSET.sha256"
 (cd "$TMP" && sha256sum -c "$ENGINE_ASSET.sha256")
@@ -75,6 +75,7 @@ rm -rf "$ROOT/lib/auth" "$ROOT/lib/bol"
 cp -a "$SCRIPT_DIR/auth" "$ROOT/lib/auth"
 install -m755 "$SCRIPT_DIR/scripts/runtime.py" "$ROOT/lib/runtime.py"
 install -m755 "$SCRIPT_DIR/scripts/gui.py" "$ROOT/lib/gui.py"
+install -m644 "$SCRIPT_DIR/scripts/removal.py" "$ROOT/lib/removal.py"
 install -m644 "$SCRIPT_DIR/auth/LICENSE" \
   "$ROOT/licenses/BedrockOnLinux-LICENSE"
 printf '%s\n' "$CONTENT" > "$ROOT/game-dir"

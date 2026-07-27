@@ -8,12 +8,12 @@ Minecraft Bedrock GDK builds installer on Linux with working Xbox authentication
 
 ## What it does
 
-- Accepts an authorized `.zip`, `.msixvc`, or `.msixv`
+- Accepts `.zip`, `.msixvc`, or `.msixv` packages
 - Provides a desktop UI for installation, account login, and launching
 - Decrypts `/LT` test-crypted development packages entirely on Linux
 - Installs an MCBE-compatible GDK-Proton xuser engine
 - Opens Microsoft device-code sign-in automatically when needed
-- Launches directly through `umu` without the BedrockOnLinux AppImage
+- Launches through `umu`
 - Keeps its profile separate from other Minecraft installations
 - Installs a standard XDG desktop entry for desktop environments and app launchers
 
@@ -120,14 +120,14 @@ Rerun the same command after `git pull` to update an existing installation.
 ## Documentation
 
 - [Native `/LT` package extraction](docs/DECRYPTION.md)
-- [Engine sources and provenance](docs/ENGINE.md)
+- [Compatibility engine source](https://github.com/veedy-dev/mcbe-gdk-engine)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 
 ## Engine source
 
-The compatibility engine is built from pinned public WineGDK sources documented
-in [Engine sources and provenance](docs/ENGINE.md). Authentication and prefix
-setup use a pinned, MIT-licensed subset of
+The compatibility engine source, build workflow, and release provenance live in
+[mcbe-gdk-engine](https://github.com/veedy-dev/mcbe-gdk-engine).
+Authentication and prefix setup use a pinned, MIT-licensed subset of
 [BedrockOnLinux](https://github.com/Wyze3306/BedrockOnLinux). Its launcher,
 AppImage, GUI, and game-management code are not installed.
 
