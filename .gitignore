@@ -13,3 +13,5 @@ engine/
 *.tar.gz
 *.sha256
 .env
+__pycache__/
+*.py[cod]

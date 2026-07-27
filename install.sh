@@ -4,12 +4,9 @@ set -euo pipefail
 REPO="veedy-dev/mcbe-gdk-linux"
 RELEASE="v0.1.0"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-BOL_VERSION="2.1.1"
-BOL_ASSET="BedrockOnLinux-${BOL_VERSION}-x86_64.AppImage"
 ENGINE_ASSET="GDK-Proton-mcbe-gdk-native12.tar.gz"
 ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/games/mcbe-gdk-linux"
 BIN_DIR="$HOME/.local/bin"
-APP_DIR="$HOME/.local/opt/bedrock-on-linux"
 APPLICATIONS_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 
 usage() {
@@ -39,9 +36,19 @@ CONTENT="$(realpath "$CONTENT")"
 command -v curl >/dev/null || { echo "curl is required." >&2; exit 1; }
 command -v tar >/dev/null || { echo "tar is required." >&2; exit 1; }
 command -v sha256sum >/dev/null || { echo "sha256sum is required." >&2; exit 1; }
+command -v python3 >/dev/null || { echo "python3 is required." >&2; exit 1; }
 
-mkdir -p "$ROOT/engine" "$ROOT/profile" "$BIN_DIR" "$APP_DIR" "$APPLICATIONS_DIR"
+mkdir -p \
+  "$ROOT/engine" "$ROOT/profile" "$ROOT/lib" "$ROOT/licenses" \
+  "$BIN_DIR" "$APPLICATIONS_DIR"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+
+MCBE_GDK_ROOT="$ROOT" BOL_HOME="$ROOT/profile" \
+PYTHONPATH="$SCRIPT_DIR/third_party/bedrock-on-linux${PYTHONPATH:+:$PYTHONPATH}" \
+  python3 "$SCRIPT_DIR/scripts/runtime.py" ensure-deps || {
+    echo "Install python-cryptography with your distribution package manager." >&2
+    exit 1
+  }
 
 json_escape() {
   local value="$1"
@@ -56,19 +63,6 @@ if [[ -f "$CONTENT/Microsoft.WindowsAppRuntime.Bootstrap.dll" ]]; then
      "$CONTENT/Microsoft.WindowsAppRuntime.Bootstrap.dll.disabled"
 fi
 
-echo "Downloading BedrockOnLinux ${BOL_VERSION}..."
-curl -fL --retry 3 \
-  "https://github.com/Wyze3306/BedrockOnLinux/releases/download/v${BOL_VERSION}/${BOL_ASSET}" \
-  -o "$APP_DIR/$BOL_ASSET"
-curl -fL --retry 3 \
-  "https://github.com/Wyze3306/BedrockOnLinux/releases/download/v${BOL_VERSION}/BedrockOnLinux-${BOL_VERSION}-SHA256SUMS" \
-  -o "$TMP/bol.sha256"
-EXPECTED="$(awk -v f="$BOL_ASSET" '$2==f || $2=="*"f {print $1; exit}' "$TMP/bol.sha256")"
-[[ -n "$EXPECTED" ]] || { echo "Could not find BOL checksum." >&2; exit 1; }
-echo "$EXPECTED  $APP_DIR/$BOL_ASSET" | sha256sum -c -
-chmod +x "$APP_DIR/$BOL_ASSET"
-ln -sfn "$BOL_ASSET" "$APP_DIR/BedrockOnLinux.AppImage"
-
 echo "Downloading the MCBE GDK compatibility engine..."
 RELEASE_URL="https://github.com/$REPO/releases/download/$RELEASE"
 curl -fL --retry 3 "$RELEASE_URL/$ENGINE_ASSET" -o "$TMP/$ENGINE_ASSET"
@@ -76,6 +70,14 @@ curl -fL --retry 3 "$RELEASE_URL/$ENGINE_ASSET.sha256" -o "$TMP/$ENGINE_ASSET.sh
 (cd "$TMP" && sha256sum -c "$ENGINE_ASSET.sha256")
 rm -rf "$ROOT/engine/GDK-Proton-mcbe-gdk"
 tar -xzf "$TMP/$ENGINE_ASSET" -C "$ROOT/engine"
+
+rm -rf "$ROOT/lib/bol"
+cp -a "$SCRIPT_DIR/third_party/bedrock-on-linux/bol" "$ROOT/lib/bol"
+install -m755 "$SCRIPT_DIR/scripts/runtime.py" "$ROOT/lib/runtime.py"
+install -m644 "$SCRIPT_DIR/third_party/bedrock-on-linux/LICENSE" \
+  "$ROOT/licenses/BedrockOnLinux-LICENSE"
+printf '%s\n' "$CONTENT" > "$ROOT/game-dir"
+ln -sfn "$CONTENT" "$ROOT/profile/content"
 
 ROOT_JSON="$(json_escape "$ROOT")"
 CONTENT_JSON="$(json_escape "$CONTENT")"
@@ -94,10 +96,16 @@ cat > "$ROOT/profile/settings.json" <<JSON
 JSON
 
 install -m755 "$SCRIPT_DIR/scripts/launch.sh" "$BIN_DIR/mcbe-gdk-linux"
-install -m755 "$SCRIPT_DIR/scripts/configure.sh" "$BIN_DIR/mcbe-gdk-linux-config"
+install -m755 "$SCRIPT_DIR/scripts/auth.sh" "$BIN_DIR/mcbe-gdk-linux-auth"
 install -m755 "$SCRIPT_DIR/scripts/recover.sh" "$BIN_DIR/mcbe-gdk-linux-recover"
 install -m755 "$SCRIPT_DIR/scripts/rgl-env.sh" "$BIN_DIR/mcbe-gdk-linux-regolith-env"
+ln -sfn "mcbe-gdk-linux-auth" "$BIN_DIR/mcbe-gdk-linux-login"
+ln -sfn "mcbe-gdk-linux-auth" "$BIN_DIR/mcbe-gdk-linux-logout"
+ln -sfn "mcbe-gdk-linux-auth" "$BIN_DIR/mcbe-gdk-linux-config"
 ln -sfn "mcbe-gdk-linux-regolith-env" "$BIN_DIR/mcbe-gdk-linux-rgl-env"
+
+MCBE_GDK_ROOT="$ROOT" BOL_HOME="$ROOT/profile" PYTHONPATH="$ROOT/lib" \
+  python3 "$ROOT/lib/runtime.py" ensure-umu
 
 cat > "$APPLICATIONS_DIR/mcbe-gdk-linux.desktop" <<EOF_DESKTOP
 [Desktop Entry]
@@ -117,7 +125,6 @@ fi
 
 echo
 echo "Installed successfully."
-echo "1. Run: mcbe-gdk-linux-config"
-echo "2. Choose Sign In and authenticate your authorized Microsoft/Xbox account."
-echo "3. Run: mcbe-gdk-linux"
+echo "Run: mcbe-gdk-linux"
+echo "Microsoft/Xbox sign-in opens automatically when needed."
 echo "For Regolith/rgl: source <(mcbe-gdk-linux-regolith-env)"

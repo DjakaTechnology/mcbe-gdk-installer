@@ -18,9 +18,16 @@ USAGE
 [[ $# -eq 1 ]] || { usage; exit 2; }
 ZIP="$(realpath "$1")"
 [[ -f "$ZIP" ]] || { echo "Build archive not found: $ZIP" >&2; exit 1; }
-for command in unzip grep sed find; do
+for command in unzip grep sed find python3; do
   command -v "$command" >/dev/null || { echo "$command is required." >&2; exit 1; }
 done
+ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/games/mcbe-gdk-linux"
+MCBE_GDK_ROOT="$ROOT" BOL_HOME="$ROOT/profile" \
+PYTHONPATH="$SCRIPT_DIR/third_party/bedrock-on-linux${PYTHONPATH:+:$PYTHONPATH}" \
+  python3 "$SCRIPT_DIR/scripts/runtime.py" ensure-deps || {
+    echo "Install python-cryptography with your distribution package manager." >&2
+    exit 1
+  }
 
 if [[ -e "$STAGE" ]]; then
   echo "Setup directory already exists: $STAGE" >&2

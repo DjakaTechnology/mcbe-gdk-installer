@@ -28,3 +28,8 @@ Upstreams:
 The engine archive includes the applicable Wine/WineGDK license and patent
 notices. The account authorization and Xbox token flow remain Microsoft's; the
 engine only supplies the Windows APIs expected by the client.
+
+The host-side authentication and prefix setup use selected MIT-licensed
+BedrockOnLinux modules pinned at commit
+`27ade9259384828eb6d57d8dd6441720b2859f59`. They are included under
+`third_party/bedrock-on-linux`; no BedrockOnLinux AppImage is installed.

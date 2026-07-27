@@ -8,7 +8,7 @@ authentication and Regolith/rgl addon exports.
 - Accepts the original authorized build `.zip`
 - Stages and exports its licensed MSIXVC content through WinBoat
 - Installs an MCBE-compatible GDK-Proton xuser engine
-- Enables Microsoft/Xbox sign-in
+- Handles Microsoft/Xbox device-code sign-in without another launcher
 - Keeps its profile separate from other Minecraft installations
 - Installs a standard XDG desktop entry for desktop environments and app launchers
 - Provides the correct `COM_MOJANG` path for Regolith and rgl
@@ -17,6 +17,10 @@ authentication and Regolith/rgl addon exports.
 > This project does not include Minecraft files, credentials, licenses,
 > decryption keys, or DRM bypasses. You must have authorized access to the
 > build and Microsoft GDK.
+
+Requires x86_64 Linux, Python 3 with `cryptography`, `curl`, `tar`,
+`sha256sum`, and `flock`. The installer attempts a user-local Python package
+install when `cryptography` is missing.
 
 ## Setup
 
@@ -52,19 +56,14 @@ In the WinBoat Windows desktop:
 
 Return to the Linux terminal. Installation continues automatically.
 
-### 4. Sign in and launch
-
-Open the isolated Xbox configuration:
-
-```bash
-mcbe-gdk-linux-config
-```
-
-Sign in with the Microsoft account authorized for the build, then run:
+### 4. Launch
 
 ```bash
 mcbe-gdk-linux
 ```
+
+The first launch opens Microsoft device-code sign-in automatically. Use the
+Microsoft account authorized for the build.
 
 The game is also available as **MCBE GDK Linux** in compatible
 application launchers. Desktops that group XDG categories place it under
@@ -100,7 +99,9 @@ If you already have a decrypted `Content` directory:
 | --- | --- |
 | ZIP-to-Linux setup | `./easy-install.sh /path/to/mcbe-gdk-build.zip` |
 | Launch Minecraft | `mcbe-gdk-linux` |
-| Configure Xbox account | `mcbe-gdk-linux-config` |
+| Check Xbox account | `mcbe-gdk-linux-auth` |
+| Sign in again | `mcbe-gdk-linux-login` |
+| Sign out | `mcbe-gdk-linux-logout` |
 | Set Regolith/rgl path | `mcbe-gdk-linux-regolith-env` |
 | Remove launchers | `./uninstall.sh` |
 
@@ -114,10 +115,13 @@ If you already have a decrypted `Content` directory:
 
 This repository contains the Linux setup tooling. The compatibility engine is
 built from public WineGDK sources pinned in
-[Engine sources and provenance](docs/ENGINE.md).
+[Engine sources and provenance](docs/ENGINE.md). The standalone authentication
+runtime vendors a pinned, MIT-licensed subset of
+[BedrockOnLinux](https://github.com/Wyze3306/BedrockOnLinux); it does not install
+or run the BedrockOnLinux launcher.
 
 ## License
 
-The installer and documentation are MIT licensed. Runtime release artifacts
-retain their upstream Wine/WineGDK licenses. This project is unofficial and is
+The installer and documentation are MIT licensed. Vendored and runtime
+components retain their upstream licenses. This project is unofficial and is
 not affiliated with Microsoft or Mojang.

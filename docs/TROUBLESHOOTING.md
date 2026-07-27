@@ -3,8 +3,13 @@
 ## `Llama (0x80004001)` during sign-in
 
 Confirm that the installed engine is `GDK-Proton-mcbe-gdk`, not generic
-Wine, stock Proton, or the older non-xuser GDK-Proton build. Open
-`mcbe-gdk-linux-config`, sign out, then sign in again.
+Wine, stock Proton, or the older non-xuser GDK-Proton build. Reset the isolated
+account, then launch again:
+
+```bash
+mcbe-gdk-linux-logout
+mcbe-gdk-linux
+```
 
 ## Native assertion at roughly 65% loading
 
@@ -31,7 +36,7 @@ Startup failures are recorded in:
 ~/.local/share/games/mcbe-gdk-linux/profile/logs/desktop-launch.log
 ```
 
-If a previous GPU session was interrupted, BedrockOnLinux deliberately blocks
+If a previous GPU session was interrupted, the launcher deliberately blocks
 another launch during the same boot. Reboot once, then acknowledge the
 previous-boot marker:
 
@@ -89,8 +94,3 @@ update-desktop-database ~/.local/share/applications
 
 Then restart the application launcher or log out and back in. The entry uses
 the standard `Categories=Game;` category rather than a KDE-only menu format.
-
-## FUSE/AppImage problem
-
-Install the FUSE 2 compatibility package for your distribution, or extract the
-AppImage manually. On Arch/CachyOS this is commonly `fuse2`.

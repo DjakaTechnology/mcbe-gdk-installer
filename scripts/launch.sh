@@ -2,8 +2,14 @@
 set -uo pipefail
 ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/games/mcbe-gdk-linux"
 export BOL_HOME="$ROOT/profile"
+export MCBE_GDK_ROOT="$ROOT"
+export PYTHONPATH="$ROOT/lib"
 export PROTON_USE_WOW64=1
-APP="$HOME/.local/opt/bedrock-on-linux/BedrockOnLinux.AppImage"
+CONTENT="$(cat "$ROOT/game-dir" 2>/dev/null || true)"
+GAME="$CONTENT/Minecraft.Windows.exe"
+ENGINE="$ROOT/engine/GDK-Proton-mcbe-gdk"
+UMU="$BOL_HOME/umu/umu-run"
+RUNTIME="$ROOT/lib/runtime.py"
 LOG="$BOL_HOME/logs/desktop-launch.log"
 CACHE="$BOL_HOME/graphics-cache"
 LOCK="$BOL_HOME/.desktop-launch.lock"
@@ -17,9 +23,23 @@ notify() {
   fi
 }
 
-[[ -x "$APP" ]] || {
+[[ -f "$GAME" ]] || {
   notify 'MCBE GDK Linux' \
-    'BedrockOnLinux is missing; rerun install.sh.'
+    'Minecraft.Windows.exe is missing; rerun install.sh.'
+  exit 1
+}
+[[ -x "$ENGINE/proton" ]] || {
+  notify 'MCBE GDK Linux' \
+    'The compatibility engine is missing; rerun install.sh.'
+  exit 1
+}
+[[ -f "$RUNTIME" ]] || {
+  notify 'MCBE GDK Linux' \
+    'The standalone runtime is missing; rerun install.sh.'
+  exit 1
+}
+command -v python3 >/dev/null 2>&1 || {
+  notify 'MCBE GDK Linux' 'Python 3 is required.'
   exit 1
 }
 command -v flock >/dev/null 2>&1 || {
@@ -70,6 +90,43 @@ export __GL_SHADER_DISK_CACHE=1
 export __GL_SHADER_DISK_CACHE_PATH="$CACHE/nvidia"
 export __GL_SHADER_DISK_CACHE_SIZE=1073741824
 
+if ! python3 "$RUNTIME" prepare "$CONTENT" >> "$LOG" 2>&1; then
+  notify 'MCBE GDK Linux sign-in/setup failed' "See $LOG"
+  exit 1
+fi
+[[ -x "$UMU" ]] || {
+  notify 'MCBE GDK Linux' 'umu-launcher setup failed.'
+  exit 1
+}
+
+mkdir -p "$HOME/.steam/steam" "$ROOT/etc"
+cat > "$ROOT/etc/gnutls-no-tls13.cfg" <<'EOF'
+[priorities]
+SYSTEM = NORMAL:-VERS-TLS1.3:%COMPAT
+EOF
+
+export PROTONPATH="$ENGINE"
+export PROTON_VERB=run
+export WINEPREFIX="$BOL_HOME/compatdata/pfx"
+export STEAM_COMPAT_CLIENT_INSTALL_PATH="$HOME/.steam/steam"
+export UMU_FOLDERS_PATH="$BOL_HOME"
+export UMU_RUNTIME_UPDATE=0
+export GAMEID="${GAMEID:-umu-default}"
+export WINEDEBUG="${WINEDEBUG:--all}"
+export PROTON_ENABLE_WAYLAND=0
+export GNUTLS_SYSTEM_PRIORITY_FILE="$ROOT/etc/gnutls-no-tls13.cfg"
+export GNUTLS_SYSTEM_PRIORITY_FAIL_ON_INVALID=0
+export MICROSOFT_WINDOWSAPPRUNTIME_BOOTSTRAP_INITIALIZE_SHOWUI=0
+export MICROSOFT_WINDOWSAPPRUNTIME_BOOTSTRAP_INITIALIZE_FAILFAST=0
+export MICROSOFT_WINDOWSAPPRUNTIME_DEPLOYMENT_INITIALIZE_ONERRORSHOWUI=0
+export WINEGDK_PREAUTH_DEVICE="Z:${BOL_HOME//\//\\}\\winegdk-preauth\\device.json"
+vkd3d_config="${VKD3D_CONFIG:-}"
+if [[ ",${vkd3d_config//;/,}," != *,force_raw_va_cbv,* ]]; then
+  export VKD3D_CONFIG="${vkd3d_config:+$vkd3d_config,}force_raw_va_cbv"
+fi
+export WINEDLLOVERRIDES="cryptbase=n,b;vrclient=;vrclient_x64=;openvr_api=;wineopenxr=;amd_ags_x64=${WINEDLLOVERRIDES:+;$WINEDLLOVERRIDES}"
+[[ -n "${WAYLAND_DISPLAY:-}" ]] && export WINE_DISABLE_VULKAN_OPWR=1
+
 # Some GDK builds can expose a native assertion dialog during a Wine startup race.
 # Suppress the dialog/debug break without disabling addon or script debugging.
 while IFS= read -r -d '' options; do
@@ -82,11 +139,33 @@ while IFS= read -r -d '' options; do
 done < <(find "$BOL_HOME/compatdata" -type f -name options.txt -print0 2>/dev/null || true)
 
 notify 'Starting MCBE GDK Linux…' \
-  'Xbox pre-authentication can take several seconds. Only click once.'
+  'Xbox authentication can take several seconds. Only click once.'
 printf '\n[%(%F %T)T] Launch requested\n' -1 >> "$LOG"
 start=$SECONDS
-"$APP" play "$@" >> "$LOG" 2>&1
+
+gpu_output="$(python3 "$RUNTIME" gpu-arm 2>> "$LOG")"
+gpu_token="${gpu_output##*$'\n'}"
+if [[ "$gpu_output" == *$'\n'* ]]; then
+  printf '%s\n' "${gpu_output%$'\n'*}" >> "$LOG"
+fi
+if [[ ! "$gpu_token" =~ ^[0-9a-f]{32}$ ]]; then
+  notify 'MCBE GDK Linux safety check failed' "See $LOG"
+  exit 1
+fi
+cleanup_marker() {
+  python3 "$RUNTIME" gpu-disarm "$gpu_token" >> "$LOG" 2>&1 || true
+}
+leave_marker() {
+  trap - EXIT HUP INT TERM
+  exit 130
+}
+trap cleanup_marker EXIT
+trap leave_marker HUP INT TERM
+
+(cd "$CONTENT" && python3 "$UMU" "$GAME" "$@") >> "$LOG" 2>&1
 rc=$?
+cleanup_marker
+trap - EXIT HUP INT TERM
 elapsed=$((SECONDS - start))
 printf '[%(%F %T)T] Launcher exited rc=%d elapsed=%ds\n' \
   -1 "$rc" "$elapsed" >> "$LOG"
