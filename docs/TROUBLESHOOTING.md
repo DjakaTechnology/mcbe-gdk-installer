@@ -59,26 +59,12 @@ capture a diagnostic launch temporarily, run:
 BOL_DIAG=1 BOL_XCURL_LOG=1 mcbe-gdk-linux
 ```
 
-## Regolith/rgl: Failed to find com.mojang directory
-
-Load the MCBE GDK profile in the shell used by either compiler:
-
-```bash
-source <(mcbe-gdk-linux-regolith-env)
-```
-
-For Fish:
-
-```fish
-mcbe-gdk-linux-regolith-env --fish | source
-```
-
 ## Game does not appear in the application launcher
 
 The installer creates the standard XDG entry:
 
 ```text
-~/.local/share/applications/mcbe-gdk-linux.desktop
+~/.local/share/applications/io.github.veedydev.MCBEGDKInstaller.desktop
 ```
 
 It is not KDE-specific. KDE/GNOME can group it under **Games**; Hyprland is a

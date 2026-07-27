@@ -146,4 +146,3 @@ echo
 echo "Installed successfully."
 echo "Run: mcbe-gdk-linux-gui"
 echo "Microsoft/Xbox sign-in opens automatically when needed."
-echo "For Regolith/rgl: source <(mcbe-gdk-linux-regolith-env)"

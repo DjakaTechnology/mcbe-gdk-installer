@@ -1,7 +1,7 @@
 # MCBE GDK Installer
 
-Run an authorized Minecraft Bedrock GDK build on Linux with standalone
-Microsoft/Xbox authentication and Regolith/rgl addon exports.
+Install and run an authorized Minecraft Bedrock GDK build on Linux with
+standalone Microsoft/Xbox authentication.
 
 ## What it does
 
@@ -13,33 +13,63 @@ Microsoft/Xbox authentication and Regolith/rgl addon exports.
 - Launches directly through `umu` without the BedrockOnLinux AppImage
 - Keeps its profile separate from other Minecraft installations
 - Installs a standard XDG desktop entry for desktop environments and app launchers
-- Provides the correct `COM_MOJANG` path for Regolith and rgl
 
 > [!IMPORTANT]
 > This project does not include Minecraft files, credentials, licenses,
 > decryption keys, or DRM bypasses. You must have authorized access to the
 > build and Microsoft GDK.
 
-Requires x86_64 Linux, GTK4, Libadwaita, Python 3 with PyGObject and
-`cryptography`, `curl`, `tar`, `unzip`, `7z`, `sha256sum`, and `flock`.
-Install `qrencode` to show a QR code; the URL and device code are always
-available.
+## Requirements
 
-**CachyOS / Arch**
+- x86_64 Linux
+- An authorized `/LT` test-crypted `.zip`, `.msixvc`, or `.msixv`
+- GTK4, Libadwaita, Python 3, PyGObject, and `cryptography`
+- `curl`, `tar`, `unzip`, `7z`, `sha256sum`, and `flock`
+- `qrencode` for the sign-in QR code
+
+### Arch Linux
 
 ```bash
-sudo pacman -S --needed gtk4 libadwaita python-gobject python-cryptography qrencode curl tar unzip p7zip
+sudo pacman -S --needed \
+  gtk4 libadwaita python python-gobject python-cryptography \
+  qrencode curl tar unzip 7zip
 ```
 
-## Setup
+### Fedora
 
-### 1. Open the setup UI
+```bash
+sudo dnf install \
+  gtk4 libadwaita python3 python3-gobject python3-cryptography \
+  qrencode curl tar unzip p7zip p7zip-plugins
+```
+
+### Ubuntu / Debian
+
+```bash
+sudo apt update
+sudo apt install \
+  python3 python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 \
+  python3-cryptography qrencode curl tar unzip 7zip
+```
+
+## Install
+
+The bootstrap script installs missing dependencies, downloads the installer to
+your user data directory, and opens the setup UI:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/veedy-dev/mcbe-gdk-installer/main/bootstrap.sh | bash
+```
+
+### From source
 
 ```bash
 git clone https://github.com/veedy-dev/mcbe-gdk-installer.git
 cd mcbe-gdk-installer
 ./gui.sh
 ```
+
+## Use
 
 Choose the authorized `.zip`, `.msixvc`, or `.msixv`, then click **Install**.
 The installer downloads its pinned tools, verifies their checksums, extracts the
@@ -48,31 +78,13 @@ The first run temporarily downloads the official Microsoft GDK archive.
 Installing a newer build replaces only the game files; the isolated account,
 worlds, and profile data are preserved.
 
-### 2. Sign in and launch
-
 In the UI, click **Sign in**. Scan the QR code or open the displayed URL, then
-enter the Microsoft device code. Click **Launch Minecraft** when the account is
+enter the Microsoft device code. Click **Launch** when the account is
 connected.
 
 The app is also available as **MCBE GDK Installer** in compatible
 application launchers. Desktops that group XDG categories place it under
 **Games**; launchers used with Hyprland usually expose it through search.
-
-## Regolith / rgl path
-
-Point `COM_MOJANG` to the isolated MCBE GDK profile before using Regolith or rgl.
-
-**Bash/Zsh**
-
-```bash
-source <(mcbe-gdk-linux-regolith-env)
-```
-
-**Fish**
-
-```fish
-mcbe-gdk-linux-regolith-env --fish | source
-```
 
 ## Manual install
 
@@ -100,7 +112,6 @@ Rerun the same command after `git pull` to update an existing installation.
 | Check Xbox account | `mcbe-gdk-linux-auth` |
 | Sign in again | `mcbe-gdk-linux-login` |
 | Sign out | `mcbe-gdk-linux-logout` |
-| Set Regolith/rgl path | `mcbe-gdk-linux-regolith-env` |
 | Remove launchers | `./uninstall.sh` |
 
 ## Documentation
