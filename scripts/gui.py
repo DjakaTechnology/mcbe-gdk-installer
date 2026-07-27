@@ -49,6 +49,23 @@ def package_button_state(installed: bool, selected: bool) -> tuple[str, bool]:
     return ("Uninstall", True) if installed else ("Install", False)
 
 
+def launch_button_state(
+    installed: bool,
+    installing: bool,
+    install_stage: str,
+    running: bool,
+    starting: bool,
+    stopping: bool,
+) -> tuple[str, bool, bool, bool]:
+    if installing:
+        return (install_stage, False, True, False)
+    if running:
+        return ("Stopping…" if stopping else "Stop", not stopping, stopping, True)
+    if starting:
+        return ("Starting…", False, True, False)
+    return ("Launch", installed, False, False)
+
+
 def configure_color_scheme() -> None:
     Gtk.init()
     settings = Gtk.Settings.get_default()
@@ -71,6 +88,7 @@ class Window(Adw.ApplicationWindow):
         self.package: Path | None = None
         self.signin_dialog: Adw.Dialog | None = None
         self.installing = False
+        self.install_stage = "Installing build…"
         self.was_updating = False
         self.launch_process: subprocess.Popen | None = None
         self.stopping = False
@@ -158,13 +176,17 @@ class Window(Adw.ApplicationWindow):
 
         launch_group = Adw.PreferencesGroup()
         content.append(launch_group)
-        launch_row = Adw.ActionRow(title="Minecraft")
+        launch_row = Adw.ActionRow(title="Minecraft Bedrock")
         launch_row.add_prefix(
             Gtk.Image(icon_name="applications-games-symbolic", valign=Gtk.Align.CENTER)
         )
-        self.launch_button = Gtk.Button(
-            label="Launch", valign=Gtk.Align.CENTER
-        )
+        launch_content = Gtk.Box(spacing=8)
+        self.launch_spinner = Gtk.Spinner(visible=False)
+        self.launch_label = Gtk.Label(label="Launch")
+        launch_content.append(self.launch_spinner)
+        launch_content.append(self.launch_label)
+        self.launch_button = Gtk.Button(valign=Gtk.Align.CENTER)
+        self.launch_button.set_child(launch_content)
         self.launch_button.add_css_class("suggested-action")
         self.launch_button.connect("clicked", self.launch_action)
         launch_row.add_suffix(self.launch_button)
@@ -177,6 +199,14 @@ class Window(Adw.ApplicationWindow):
 
     def toast(self, message: str) -> None:
         self.overlay.add_toast(Adw.Toast.new(message))
+
+    def set_launch_button(self, label: str, loading: bool) -> None:
+        self.launch_label.set_label(label)
+        self.launch_spinner.set_visible(loading)
+        if loading:
+            self.launch_spinner.start()
+        else:
+            self.launch_spinner.stop()
 
     def error(self, heading: str, body: str) -> None:
         dialog = Adw.AlertDialog(heading=heading, body=body)
@@ -312,12 +342,14 @@ class Window(Adw.ApplicationWindow):
         updating = self.is_installed()
         self.was_updating = updating
         self.installing = True
+        self.install_stage = "Installing build…"
         self.install_button.set_sensitive(False)
         self.install_row.set_title("Updating build…" if updating else "Installing build…")
         self.install_row.set_subtitle("Keep this window open. Large packages can take a while.")
         self.progress.set_visible(True)
         self.progress.set_fraction(0)
         self.write(f"\nInstalling {package.name}…\n")
+        self.refresh_launch_state()
         GLib.timeout_add(120, self.pulse_progress)
 
         def worker() -> None:
@@ -485,7 +517,7 @@ class Window(Adw.ApplicationWindow):
         if not launcher or not self.is_installed():
             self.error(APP_NAME, "Install the game first.")
             return
-        self.launch_button.set_label("Starting…")
+        self.set_launch_button("Starting…", True)
         self.launch_button.set_sensitive(False)
         self.launch_process = subprocess.Popen([launcher], start_new_session=True)
 
@@ -500,21 +532,23 @@ class Window(Adw.ApplicationWindow):
                     f"Check {ROOT / 'profile/logs/desktop-launch.log'} for details.",
                 )
 
+        if not running:
+            self.stopping = False
+        label, sensitive, loading, destructive = launch_button_state(
+            self.is_installed(),
+            self.installing,
+            self.install_stage,
+            running,
+            self.launch_process is not None,
+            self.stopping,
+        )
+        self.set_launch_button(label, loading)
         self.launch_button.remove_css_class("suggested-action")
         self.launch_button.remove_css_class("destructive-action")
-        if running:
-            self.launch_button.set_label("Stopping…" if self.stopping else "Stop")
-            self.launch_button.add_css_class("destructive-action")
-            self.launch_button.set_sensitive(not self.stopping)
-        else:
-            self.stopping = False
-            self.launch_button.set_label(
-                "Starting…" if self.launch_process else "Launch"
-            )
-            self.launch_button.add_css_class("suggested-action")
-            self.launch_button.set_sensitive(
-                self.is_installed() and self.launch_process is None
-            )
+        self.launch_button.add_css_class(
+            "destructive-action" if destructive else "suggested-action"
+        )
+        self.launch_button.set_sensitive(sensitive)
         return GLib.SOURCE_CONTINUE
 
     def poll(self) -> bool:
@@ -523,7 +557,17 @@ class Window(Adw.ApplicationWindow):
                 event = self.events.get_nowait()
                 kind = event[0]
                 if kind == "log":
-                    self.write(event[1])
+                    line = event[1]
+                    self.write(line)
+                    if line.startswith(
+                        "Downloading the MCBE GDK compatibility engine"
+                    ):
+                        self.install_stage = "Downloading engine…"
+                    elif line.startswith(
+                        "Installing the MCBE GDK compatibility engine"
+                    ):
+                        self.install_stage = "Installing engine…"
+                    self.refresh_launch_state()
                 elif kind == "code":
                     self.show_code(event[1], event[2])
                 elif kind == "install_done":
@@ -604,4 +648,10 @@ if __name__ == "__main__":
     assert package_button_state(False, True) == ("Install", False)
     assert package_button_state(True, False) == ("Uninstall", True)
     assert package_button_state(True, True) == ("Update", False)
+    assert launch_button_state(True, True, "Installing…", False, False, False) == (
+        "Installing…", False, True, False
+    )
+    assert launch_button_state(True, False, "", True, False, False) == (
+        "Stop", True, False, True
+    )
     main()
