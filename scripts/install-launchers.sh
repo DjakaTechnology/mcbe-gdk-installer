@@ -33,6 +33,15 @@ if [[ -f "$SOURCE/assets/mcbe-gdk-installer.png" ]]; then
   ICON_VALUE="$ICON"
 fi
 
+MINECRAFT_ICON="$ROOT/minecraft-bedrock.png"
+MINECRAFT_ICON_VALUE="applications-games"
+if [[ -f "$ROOT/game/StoreLogo.png" ]]; then
+  install -m644 "$ROOT/game/StoreLogo.png" "$MINECRAFT_ICON"
+  MINECRAFT_ICON_VALUE="$MINECRAFT_ICON"
+elif [[ -f "$MINECRAFT_ICON" ]]; then
+  MINECRAFT_ICON_VALUE="$MINECRAFT_ICON"
+fi
+
 rm -f "$APPLICATIONS_DIR/mcbe-gdk-linux.desktop"
 cat >"$APPLICATIONS_DIR/io.github.veedydev.MCBEGDKInstaller.desktop" <<EOF
 [Desktop Entry]
@@ -56,7 +65,7 @@ Type=Application
 Name=Minecraft Bedrock
 Comment=Launch Minecraft Bedrock
 Exec=$BIN_DIR/mcbe-gdk-linux
-Icon=$ICON_VALUE
+Icon=$MINECRAFT_ICON_VALUE
 Terminal=false
 Categories=Game;
 Keywords=Minecraft;Bedrock;Xbox;Game;

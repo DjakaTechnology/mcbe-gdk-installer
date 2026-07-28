@@ -70,6 +70,7 @@ fi
 echo "Downloading the MCBE GDK compatibility engine..."
 RELEASE_URL="https://github.com/$ENGINE_REPO/releases/download/$ENGINE_RELEASE"
 curl -fL --retry 3 "$RELEASE_URL/$ENGINE_ASSET" -o "$TMP/$ENGINE_ASSET"
+echo "Verifying the MCBE GDK compatibility engine..."
 curl -fL --retry 3 "$RELEASE_URL/$ENGINE_ASSET.sha256" -o "$TMP/$ENGINE_ASSET.sha256"
 (cd "$TMP" && sha256sum -c "$ENGINE_ASSET.sha256")
 echo "Installing the MCBE GDK compatibility engine..."

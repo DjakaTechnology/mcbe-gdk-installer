@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import queue
+import re
 import shutil
 import subprocess
 import sys
@@ -85,8 +86,12 @@ def installation_status(line: str) -> tuple[str, str] | None:
             "Downloading the MCBE GDK compatibility engine",
             (
                 "Downloading compatibility engine…",
-                "About 800 MB; download progress is available in Installation details.",
+                "0% of about 800 MB downloaded.",
             ),
+        ),
+        (
+            "Verifying the MCBE GDK compatibility engine",
+            ("Verifying compatibility engine…", "Checking the release checksum."),
         ),
         (
             "Installing the MCBE GDK compatibility engine",
@@ -96,6 +101,14 @@ def installation_status(line: str) -> tuple[str, str] | None:
         ("Installed successfully", ("Finishing installation…", "Saving launchers and settings.")),
     )
     return next((status for marker, status in stages if marker in line), None)
+
+
+def curl_progress_percent(line: str) -> int | None:
+    match = re.match(r"\s*\d{1,3}\s+\S+\s+(\d{1,3})\s+\S+", line)
+    if not match:
+        return None
+    percent = int(match.group(1))
+    return percent if 0 <= percent <= 100 else None
 
 
 def configure_color_scheme() -> None:
@@ -120,6 +133,7 @@ class Window(Adw.ApplicationWindow):
         self.package: Path | None = None
         self.signin_dialog: Adw.Dialog | None = None
         self.installing = False
+        self.engine_downloading = False
         self.was_updating = False
         self.available_updates: AvailableUpdates | None = None
         self.updating = False
@@ -546,6 +560,7 @@ class Window(Adw.ApplicationWindow):
         updating = self.is_installed()
         self.was_updating = updating
         self.installing = True
+        self.engine_downloading = False
         self.install_button.set_sensitive(False)
         self.install_row.set_title("Preparing update…" if updating else "Preparing installation…")
         self.install_row.set_subtitle("Reading the selected package.")
@@ -576,7 +591,7 @@ class Window(Adw.ApplicationWindow):
         threading.Thread(target=worker, daemon=True).start()
 
     def pulse_progress(self) -> bool:
-        if self.installing:
+        if self.installing and not self.engine_downloading:
             self.progress.pulse()
         return self.installing
 
@@ -766,10 +781,22 @@ class Window(Adw.ApplicationWindow):
                     if status:
                         self.install_row.set_title(status[0])
                         self.install_row.set_subtitle(status[1])
+                        self.engine_downloading = (
+                            status[0] == "Downloading compatibility engine…"
+                        )
+                        self.progress.set_fraction(0)
+                    elif self.engine_downloading:
+                        percent = curl_progress_percent(line)
+                        if percent is not None:
+                            self.progress.set_fraction(percent / 100)
+                            self.install_row.set_subtitle(
+                                f"{percent}% of about 800 MB downloaded."
+                            )
                 elif kind == "code":
                     self.show_code(event[1], event[2])
                 elif kind == "install_done":
                     self.installing = False
+                    self.engine_downloading = False
                     self.progress.set_visible(False)
                     if event[1] == 0:
                         self.write("\nInstallation complete.\n")
@@ -833,6 +860,7 @@ class Window(Adw.ApplicationWindow):
                     self.error("Update failed", event[1])
                 elif kind == "error":
                     self.installing = False
+                    self.engine_downloading = False
                     self.stopping = False
                     self.progress.set_visible(False)
                     if self.signin_dialog:
@@ -878,6 +906,8 @@ if __name__ == "__main__":
     )
     assert installation_status("Downloading the MCBE GDK compatibility engine...") == (
         "Downloading compatibility engine…",
-        "About 800 MB; download progress is available in Installation details.",
+        "0% of about 800 MB downloaded.",
     )
+    assert curl_progress_percent(" 88 798.7M 88 706.0M 0 0 34.62M") == 88
+    assert curl_progress_percent("  % Total  % Received") is None
     main()
