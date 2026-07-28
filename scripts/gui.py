@@ -58,19 +58,44 @@ def package_button_state(installed: bool, selected: bool) -> tuple[str, bool]:
 
 def launch_button_state(
     installed: bool,
-    installing: bool,
-    install_stage: str,
+    busy: bool,
     running: bool,
     starting: bool,
     stopping: bool,
 ) -> tuple[str, bool, bool, bool]:
-    if installing:
-        return (install_stage, False, True, False)
+    if busy:
+        return ("Launch", False, False, False)
     if running:
         return ("Stopping…" if stopping else "Stop", not stopping, stopping, True)
     if starting:
         return ("Starting…", False, True, False)
     return ("Launch", installed, False, False)
+
+
+def installation_status(line: str) -> tuple[str, str] | None:
+    stages = (
+        ("Reading the package", ("Reading package…", "Inspecting the selected build.")),
+        ("Downloading XVDTool", ("Downloading extraction tools…", "One-time setup download.")),
+        ("Downloading dotnet-runtime", ("Downloading .NET runtime…", "One-time setup download.")),
+        ("Downloading GDK_", ("Downloading Microsoft GDK files…", "One-time setup download.")),
+        ("Extracting the public GDK test key", ("Preparing package key…", "Using the public GDK test key.")),
+        ("Decrypting the test package", ("Decrypting package…", "Preparing the authorized game files.")),
+        ("Extracting game content", ("Extracting game files…", "Large packages can take several minutes.")),
+        (
+            "Downloading the MCBE GDK compatibility engine",
+            (
+                "Downloading compatibility engine…",
+                "About 800 MB; download progress is available in Installation details.",
+            ),
+        ),
+        (
+            "Installing the MCBE GDK compatibility engine",
+            ("Installing compatibility engine…", "Verifying and extracting the runtime."),
+        ),
+        ("Downloading umu-launcher", ("Downloading launcher runtime…", "Preparing the Linux launcher.")),
+        ("Installed successfully", ("Finishing installation…", "Saving launchers and settings.")),
+    )
+    return next((status for marker, status in stages if marker in line), None)
 
 
 def configure_color_scheme() -> None:
@@ -95,7 +120,6 @@ class Window(Adw.ApplicationWindow):
         self.package: Path | None = None
         self.signin_dialog: Adw.Dialog | None = None
         self.installing = False
-        self.install_stage = "Installing build…"
         self.was_updating = False
         self.available_updates: AvailableUpdates | None = None
         self.updating = False
@@ -339,7 +363,6 @@ class Window(Adw.ApplicationWindow):
             )
             return
         self.updating = True
-        self.install_stage = "Installing updates…"
         self.update_banner.set_title("Downloading and verifying updates…")
         self.update_banner.set_button_label("Updating…")
         self.update_progress.set_visible(True)
@@ -523,10 +546,9 @@ class Window(Adw.ApplicationWindow):
         updating = self.is_installed()
         self.was_updating = updating
         self.installing = True
-        self.install_stage = "Installing build…"
         self.install_button.set_sensitive(False)
-        self.install_row.set_title("Updating build…" if updating else "Installing build…")
-        self.install_row.set_subtitle("Keep this window open. Large packages can take a while.")
+        self.install_row.set_title("Preparing update…" if updating else "Preparing installation…")
+        self.install_row.set_subtitle("Reading the selected package.")
         self.progress.set_visible(True)
         self.progress.set_fraction(0)
         self.write(f"\nInstalling {package.name}…\n")
@@ -716,11 +738,9 @@ class Window(Adw.ApplicationWindow):
         if not running:
             self.stopping = False
         busy = self.installing or self.updating
-        stage = self.install_stage if busy else ""
         label, sensitive, loading, destructive = launch_button_state(
             self.is_installed(),
             busy,
-            stage,
             running,
             self.launch_process is not None,
             self.stopping,
@@ -742,15 +762,10 @@ class Window(Adw.ApplicationWindow):
                 if kind == "log":
                     line = event[1]
                     self.write(line)
-                    if line.startswith(
-                        "Downloading the MCBE GDK compatibility engine"
-                    ):
-                        self.install_stage = "Downloading runtime…"
-                    elif line.startswith(
-                        "Installing the MCBE GDK compatibility engine"
-                    ):
-                        self.install_stage = "Installing runtime…"
-                    self.refresh_launch_state()
+                    status = installation_status(line)
+                    if status:
+                        self.install_row.set_title(status[0])
+                        self.install_row.set_subtitle(status[1])
                 elif kind == "code":
                     self.show_code(event[1], event[2])
                 elif kind == "install_done":
@@ -855,10 +870,14 @@ if __name__ == "__main__":
     assert package_button_state(False, True) == ("Install", False)
     assert package_button_state(True, False) == ("Uninstall", True)
     assert package_button_state(True, True) == ("Update", False)
-    assert launch_button_state(True, True, "Installing…", False, False, False) == (
-        "Installing…", False, True, False
+    assert launch_button_state(True, True, False, False, False) == (
+        "Launch", False, False, False
     )
-    assert launch_button_state(True, False, "", True, False, False) == (
+    assert launch_button_state(True, False, True, False, False) == (
         "Stop", True, False, True
+    )
+    assert installation_status("Downloading the MCBE GDK compatibility engine...") == (
+        "Downloading compatibility engine…",
+        "About 800 MB; download progress is available in Installation details.",
     )
     main()
