@@ -3,6 +3,7 @@ set -euo pipefail
 
 REPO="veedy-dev/mcbe-gdk-installer"
 SOURCE_DIR="${MCBE_GDK_SOURCE_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/mcbe-gdk-installer/source}"
+ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/games/mcbe-gdk-linux"
 
 run_root() {
   if (( EUID == 0 )); then
@@ -128,6 +129,9 @@ else
   [[ ! -e "$backup" ]] || mv "$backup" "$SOURCE_DIR"
   exit 1
 fi
+
+echo "Installing MCBE GDK launchers..."
+"$SOURCE_DIR/scripts/install-launchers.sh" "$ROOT" "$SOURCE_DIR"
 
 echo "Opening MCBE GDK Installer..."
 exec "$SOURCE_DIR/gui.sh"
