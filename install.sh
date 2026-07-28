@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ENGINE_REPO="veedy-dev/mcbe-gdk-engine"
-ENGINE_RELEASE="v0.1.1"
+ENGINE_RELEASE="v0.1.2"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ENGINE_ASSET="GDK-Proton-mcbe-gdk-${ENGINE_RELEASE}.tar.gz"
 ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/games/mcbe-gdk-linux"
