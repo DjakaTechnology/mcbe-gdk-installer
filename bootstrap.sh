@@ -68,16 +68,61 @@ stage="$(mktemp -d "$parent/.bootstrap.XXXXXX")"
 trap 'rm -rf "$stage"' EXIT
 
 echo "Downloading MCBE GDK Installer..."
-curl -fL --retry 3 \
-  "https://github.com/$REPO/archive/refs/heads/main.tar.gz" \
-  -o "$stage/source.tar.gz"
-mkdir "$stage/source"
-tar -xzf "$stage/source.tar.gz" --strip-components=1 -C "$stage/source"
+curl -fsSL --retry 3 \
+  -H "Accept: application/vnd.github+json" \
+  -H "X-GitHub-Api-Version: 2022-11-28" \
+  "https://api.github.com/repos/$REPO/releases/latest" \
+  -o "$stage/release.json"
+mapfile -t release < <(
+  python3 - "$stage/release.json" "$REPO" <<'PY'
+import json
+import re
+import sys
+from urllib.parse import urlparse
+
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+repo = sys.argv[2]
+tag = str(data["tag_name"])
+if not re.fullmatch(r"v\d+\.\d+\.\d+", tag):
+    raise SystemExit("The latest installer release has an invalid version.")
+names = [
+    f"mcbe-gdk-installer-{tag}.tar.gz",
+    f"mcbe-gdk-installer-{tag}.tar.gz.sha256",
+]
+assets = {
+    str(asset["name"]): str(asset["browser_download_url"])
+    for asset in data.get("assets", [])
+}
+print(tag)
+for name in names:
+    url = assets.get(name, "")
+    parsed = urlparse(url)
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != "github.com"
+        or f"/{repo}/releases/download/{tag}/" not in parsed.path
+    ):
+        raise SystemExit(f"The latest installer release is missing {name}.")
+    print(url)
+PY
+)
+tag="${release[0]}"
+archive="mcbe-gdk-installer-$tag.tar.gz"
+curl -fL --retry 3 "${release[1]}" -o "$stage/$archive"
+curl -fL --retry 3 "${release[2]}" -o "$stage/$archive.sha256"
+(cd "$stage" && sha256sum -c "$archive.sha256")
+tar -xzf "$stage/$archive" -C "$stage"
+source="$stage/mcbe-gdk-installer"
+[[ "$(<"$source/VERSION")" == "$tag" ]] || {
+  echo "Installer archive version does not match $tag." >&2
+  exit 1
+}
+touch "$source/.mcbe-managed-source"
 
 backup="$SOURCE_DIR.previous"
 rm -rf "$backup"
 [[ ! -e "$SOURCE_DIR" ]] || mv "$SOURCE_DIR" "$backup"
-if mv "$stage/source" "$SOURCE_DIR"; then
+if mv "$source" "$SOURCE_DIR"; then
   rm -rf "$backup"
 else
   [[ ! -e "$backup" ]] || mv "$backup" "$SOURCE_DIR"

@@ -1,0 +1,142 @@
+import hashlib
+import io
+import json
+import os
+import sys
+import tarfile
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+os.environ.setdefault("MCBE_GDK_ROOT", "/tmp/mcbe-gdk-update-tests")
+
+from updates import (  # noqa: E402
+    ENGINE_REPO,
+    INSTALLER_REPO,
+    Release,
+    UpdateError,
+    _validate_archive,
+    _verify_checksum,
+    check_for_updates,
+    fetch_latest_release,
+    is_newer,
+)
+
+
+class Response:
+    def __init__(self, data: bytes):
+        self.data = data
+        self.headers = {"Content-Length": str(len(data))}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return None
+
+    def read(self, _size=-1):
+        data, self.data = self.data, b""
+        return data
+
+
+def release(repo: str, tag: str) -> Release:
+    archive = (
+        f"mcbe-gdk-installer-{tag}.tar.gz"
+        if repo == INSTALLER_REPO
+        else f"GDK-Proton-mcbe-gdk-{tag}.tar.gz"
+    )
+    base = f"https://github.com/{repo}/releases/download/{tag}"
+    return Release(
+        repo=repo,
+        tag=tag,
+        name=tag,
+        body="Changes",
+        url=f"https://github.com/{repo}/releases/tag/{tag}",
+        assets={
+            archive: f"{base}/{archive}",
+            f"{archive}.sha256": f"{base}/{archive}.sha256",
+        },
+    )
+
+
+class UpdateTests(unittest.TestCase):
+    def test_semantic_versions_do_not_use_lexical_order(self):
+        self.assertTrue(is_newer("v0.1.10", "v0.1.9"))
+        self.assertFalse(is_newer("v0.1.2", "v0.1.2"))
+        with self.assertRaises(UpdateError):
+            is_newer("latest", "v0.1.2")
+
+    def test_latest_release_metadata_is_validated(self):
+        repo = INSTALLER_REPO
+        data = {
+            "tag_name": "v0.1.3",
+            "name": "MCBE GDK Installer v0.1.3",
+            "body": "Automatic updates",
+            "html_url": f"https://github.com/{repo}/releases/tag/v0.1.3",
+            "assets": [
+                {
+                    "name": "mcbe-gdk-installer-v0.1.3.tar.gz",
+                    "state": "uploaded",
+                    "browser_download_url": (
+                        f"https://github.com/{repo}/releases/download/v0.1.3/"
+                        "mcbe-gdk-installer-v0.1.3.tar.gz"
+                    ),
+                }
+            ],
+        }
+        with patch("updates.urlopen", return_value=Response(json.dumps(data).encode())):
+            latest = fetch_latest_release(repo)
+        self.assertEqual(latest.tag, "v0.1.3")
+        self.assertIn("mcbe-gdk-installer-v0.1.3.tar.gz", latest.assets)
+
+        data["html_url"] = "https://example.com/update"
+        with patch("updates.urlopen", return_value=Response(json.dumps(data).encode())):
+            with self.assertRaises(UpdateError):
+                fetch_latest_release(repo)
+
+    def test_checks_installer_and_engine_independently(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            tool = root / "source"
+            tool.mkdir()
+            (tool / "VERSION").write_text("v0.1.2\n")
+            engine = root / "engine/GDK-Proton-mcbe-gdk"
+            engine.mkdir(parents=True)
+            (engine / "engine-manifest.json").write_text(
+                json.dumps({"version": "v0.1.2"})
+            )
+            with patch(
+                "updates.fetch_latest_release",
+                side_effect=[release(INSTALLER_REPO, "v0.1.3"), UpdateError("offline")],
+            ):
+                available = check_for_updates(tool, root)
+            self.assertEqual(available.installer.tag, "v0.1.3")
+            self.assertIsNone(available.engine)
+
+    def test_checksum_and_archive_paths_are_verified(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive = root / "source.tar.gz"
+            archive.write_bytes(b"release")
+            digest = hashlib.sha256(b"release").hexdigest()
+            checksum = root / "source.tar.gz.sha256"
+            checksum.write_text(f"{digest}  source.tar.gz\n")
+            _verify_checksum(archive, checksum)
+            checksum.write_text(f"{'0' * 64}  source.tar.gz\n")
+            with self.assertRaises(UpdateError):
+                _verify_checksum(archive, checksum)
+
+            unsafe = root / "unsafe.tar.gz"
+            with tarfile.open(unsafe, "w:gz") as bundle:
+                info = tarfile.TarInfo("../outside")
+                info.size = 1
+                bundle.addfile(info, io.BytesIO(b"x"))
+            with self.assertRaises(UpdateError):
+                _validate_archive(unsafe, "mcbe-gdk-installer", links=False)
+
+
+if __name__ == "__main__":
+    unittest.main()

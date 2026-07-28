@@ -13,8 +13,9 @@ Minecraft Bedrock GDK builds installer on Linux with working Xbox authentication
 
 - Accepts `.zip`, `.msixvc`, or `.msixv` packages
 - Provides a desktop UI for installation, account login, and launching
+- Notifies you about installer and compatibility-engine updates
 - Decrypts `/LT` test-crypted development packages entirely on Linux
-- Installs an MCBE-compatible GDK-Proton xuser engine
+- Installs the latest verified MCBE-compatible GDK-Proton xuser engine
 - Opens Microsoft device-code sign-in automatically when needed
 - Launches through `umu`
 - Keeps its profile separate from other Minecraft installations
@@ -60,8 +61,8 @@ sudo apt install \
 
 ## Install
 
-The bootstrap script installs missing dependencies, downloads the installer to
-your user data directory, and opens the setup UI:
+The bootstrap script installs missing dependencies, verifies and downloads the
+latest installer release to your user data directory, and opens the setup UI:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/veedy-dev/mcbe-gdk-installer/main/bootstrap.sh | bash
@@ -78,8 +79,8 @@ cd mcbe-gdk-installer
 ## Use
 
 Choose the authorized `.zip`, `.msixvc`, or `.msixv`, then click **Install**.
-The installer downloads its pinned tools, verifies their checksums, extracts the
-public GDK test key locally, decrypts the package, and installs it.
+The installer selects the latest engine release, verifies its checksum, extracts
+the public GDK test key locally, decrypts the package, and installs it.
 The first run temporarily downloads the official Microsoft GDK archive.
 Installing a newer build replaces only the game files; the isolated account,
 worlds, and profile data are preserved.
@@ -87,6 +88,11 @@ worlds, and profile data are preserved.
 In the UI, click **Sign in**. Scan the QR code or open the displayed URL, then
 enter the Microsoft device code. Click **Launch** when the account is
 connected.
+
+When an installer or engine update is available, a banner appears above the
+Package section. Select **Review** to read the release changelog, then choose
+**Install updates** or **Later**. Minecraft, worlds, settings, and account data
+are preserved.
 
 The app is also available as **MCBE GDK Installer** in compatible
 application launchers. Desktops that group XDG categories place it under
@@ -107,6 +113,8 @@ If you already have a decrypted `Content` directory:
 ```
 
 Rerun the same command after `git pull` to update an existing installation.
+Set `MCBE_GDK_ENGINE_RELEASE=vX.Y.Z` to install a specific engine release for
+testing or rollback.
 
 ## Commands
 

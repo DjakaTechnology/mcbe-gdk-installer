@@ -38,6 +38,13 @@ from removal import (  # noqa: E402
     stop_minecraft,
 )
 from runtime import login, logout  # noqa: E402
+from updates import (  # noqa: E402
+    AvailableUpdates,
+    UpdateError,
+    check_for_updates,
+    install_engine_update,
+    install_installer_update,
+)
 
 APP_ID = "io.github.veedydev.MCBEGDKInstaller"
 APP_NAME = "MCBE GDK Installer"
@@ -90,6 +97,8 @@ class Window(Adw.ApplicationWindow):
         self.installing = False
         self.install_stage = "Installing build…"
         self.was_updating = False
+        self.available_updates: AvailableUpdates | None = None
+        self.updating = False
         self.launch_process: subprocess.Popen | None = None
         self.stopping = False
 
@@ -112,6 +121,27 @@ class Window(Adw.ApplicationWindow):
             margin_end=24,
         )
         clamp.set_child(content)
+
+        self.update_banner = Adw.Banner(
+            title="Update available",
+            button_label="Review",
+            revealed=False,
+        )
+        self.update_banner.set_button_style(Adw.BannerButtonStyle.SUGGESTED)
+        self.update_banner.connect("button-clicked", self.review_update)
+        self.update_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=6,
+            visible=False,
+        )
+        self.update_box.append(self.update_banner)
+        self.update_progress = Gtk.ProgressBar(
+            visible=False,
+            margin_start=8,
+            margin_end=8,
+        )
+        self.update_box.append(self.update_progress)
+        content.append(self.update_box)
 
         install_group = Adw.PreferencesGroup(title="Package")
         content.append(install_group)
@@ -196,6 +226,7 @@ class Window(Adw.ApplicationWindow):
         self.refresh_account()
         GLib.timeout_add(100, self.poll)
         GLib.timeout_add(500, self.refresh_launch_state)
+        self.check_updates()
 
     def toast(self, message: str) -> None:
         self.overlay.add_toast(Adw.Toast.new(message))
@@ -212,6 +243,156 @@ class Window(Adw.ApplicationWindow):
         dialog = Adw.AlertDialog(heading=heading, body=body)
         dialog.add_response("close", "Close")
         dialog.present(self)
+
+    def check_updates(self) -> None:
+        def worker() -> None:
+            try:
+                updates = check_for_updates(TOOL_ROOT, ROOT)
+            except UpdateError:
+                return
+            if updates:
+                self.events.put(("updates_available", updates))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def show_updates(self, updates: AvailableUpdates) -> None:
+        self.available_updates = updates
+        count = int(bool(updates.installer)) + int(bool(updates.engine))
+        if updates.installer and updates.engine:
+            title = "Installer and engine updates are available"
+        elif updates.installer:
+            title = f"MCBE GDK Installer {updates.installer.tag} is available"
+        else:
+            assert updates.engine
+            title = f"Compatibility engine {updates.engine.tag} is available"
+        self.update_banner.set_title(title)
+        self.update_banner.set_button_label("Review updates" if count > 1 else "Review")
+        self.update_box.set_visible(True)
+        self.update_banner.set_revealed(True)
+
+    def review_update(self, _banner: Adw.Banner) -> None:
+        updates = self.available_updates
+        if not updates or self.updating:
+            return
+        dialog = Adw.AlertDialog(
+            heading="Install available updates?",
+            body="Review what changed. Minecraft, worlds, and account data are preserved.",
+        )
+        changelog = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=14,
+            margin_top=6,
+        )
+        releases = [
+            ("MCBE GDK Installer", updates.installer),
+            ("Compatibility engine", updates.engine),
+        ]
+        shown = 0
+        for component, release in releases:
+            if not release:
+                continue
+            if shown:
+                changelog.append(Gtk.Separator())
+            heading = Gtk.Label(
+                label=f"{component} · {release.tag}",
+                xalign=0,
+            )
+            heading.add_css_class("heading")
+            changelog.append(heading)
+            notes = Gtk.Label(
+                label=release.body.strip() or "Maintenance and compatibility improvements.",
+                xalign=0,
+                wrap=True,
+                wrap_mode=Gtk.WrapMode.WORD_CHAR,
+                selectable=True,
+                max_width_chars=68,
+            )
+            notes.add_css_class("dim-label")
+            changelog.append(notes)
+            shown += 1
+        scroll = Gtk.ScrolledWindow(
+            min_content_height=170,
+            max_content_height=300,
+            propagate_natural_height=True,
+        )
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_child(changelog)
+        dialog.set_extra_child(scroll)
+        dialog.add_response("later", "Later")
+        dialog.add_response("update", "Install updates")
+        dialog.set_default_response("later")
+        dialog.set_close_response("later")
+        dialog.set_response_appearance(
+            "update", Adw.ResponseAppearance.SUGGESTED
+        )
+        dialog.connect("response", self.update_response)
+        dialog.present(self)
+
+    def update_response(self, _dialog: Adw.AlertDialog, response: str) -> None:
+        updates = self.available_updates
+        if response != "update" or not updates:
+            return
+        if minecraft_launcher_pid(ROOT):
+            self.error(
+                "Close Minecraft before updating",
+                "Installer files cannot be replaced while Minecraft is running.",
+            )
+            return
+        self.updating = True
+        self.install_stage = "Installing updates…"
+        self.update_banner.set_title("Downloading and verifying updates…")
+        self.update_banner.set_button_label("Updating…")
+        self.update_progress.set_visible(True)
+        self.update_progress.pulse()
+        GLib.timeout_add(120, self.pulse_update_progress)
+        self.install_button.set_sensitive(False)
+        self.login_button.set_sensitive(False)
+        self.logout_button.set_sensitive(False)
+        self.refresh_launch_state()
+
+        def worker() -> None:
+            try:
+                with runtime_lock(ROOT):
+                    if updates.engine:
+                        install_engine_update(updates.engine, ROOT)
+                    if updates.installer:
+                        install_installer_update(updates.installer, TOOL_ROOT, ROOT)
+                self.events.put(("updates_done", bool(updates.installer)))
+            except Exception as exc:
+                self.events.put(("update_error", str(exc)))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def pulse_update_progress(self) -> bool:
+        if self.updating:
+            self.update_progress.pulse()
+        return self.updating
+
+    def prompt_restart(self) -> None:
+        dialog = Adw.AlertDialog(
+            heading="Update installed",
+            body="Restart MCBE GDK Installer to finish using the new version.",
+        )
+        dialog.add_response("later", "Later")
+        dialog.add_response("restart", "Restart now")
+        dialog.set_default_response("restart")
+        dialog.set_close_response("later")
+        dialog.set_response_appearance(
+            "restart", Adw.ResponseAppearance.SUGGESTED
+        )
+        dialog.connect("response", self.restart_response)
+        dialog.present(self)
+
+    def restart_response(self, _dialog: Adw.AlertDialog, response: str) -> None:
+        if response != "restart":
+            return
+        try:
+            os.execv(
+                sys.executable,
+                [sys.executable, str(ROOT / "lib/gui.py")],
+            )
+        except OSError as exc:
+            self.error("Could not restart the installer", str(exc))
 
     def open_url(self, url: str) -> None:
         try:
@@ -534,10 +715,12 @@ class Window(Adw.ApplicationWindow):
 
         if not running:
             self.stopping = False
+        busy = self.installing or self.updating
+        stage = self.install_stage if busy else ""
         label, sensitive, loading, destructive = launch_button_state(
             self.is_installed(),
-            self.installing,
-            self.install_stage,
+            busy,
+            stage,
             running,
             self.launch_process is not None,
             self.stopping,
@@ -609,6 +792,30 @@ class Window(Adw.ApplicationWindow):
                         self.toast("Microsoft account connected")
                     else:
                         self.error("Sign in failed", "Microsoft sign-in did not complete.")
+                elif kind == "updates_available":
+                    self.show_updates(event[1])
+                elif kind == "updates_done":
+                    self.updating = False
+                    self.update_progress.set_visible(False)
+                    self.available_updates = None
+                    self.update_banner.set_revealed(False)
+                    self.update_box.set_visible(False)
+                    self.refresh_install()
+                    self.refresh_account()
+                    if event[1]:
+                        self.prompt_restart()
+                    else:
+                        self.toast("Compatibility engine updated")
+                elif kind == "update_error":
+                    self.updating = False
+                    self.update_progress.set_visible(False)
+                    self.update_banner.set_title("Update available")
+                    self.update_banner.set_button_label("Try again")
+                    self.install_button.set_sensitive(True)
+                    self.login_button.set_sensitive(not msa_signed_in())
+                    self.logout_button.set_sensitive(msa_signed_in())
+                    self.refresh_launch_state()
+                    self.error("Update failed", event[1])
                 elif kind == "error":
                     self.installing = False
                     self.stopping = False
