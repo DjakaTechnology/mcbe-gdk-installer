@@ -28,11 +28,25 @@ Minecraft Bedrock GDK builds installer on Linux with working Xbox authentication
 
 ## Requirements
 
+### Command-line installation and launch
+
 - x86_64 Linux
-- An authorized `/LT` test-crypted `.zip`, `.msixvc`, or `.msixv`
-- GTK4, Libadwaita, Python 3, PyGObject, and `cryptography`
-- `curl`, `tar`, `unzip`, `7z`, `sha256sum`, and `flock`
-- `qrencode` for the sign-in QR code
+- An existing decrypted `Content` directory, or an authorized `/LT`
+  test-crypted `.zip`, `.msixvc`, or `.msixv`
+- Python 3 and `cryptography`
+- `curl`, `tar`, `sha256sum`, and `flock`
+- `unzip` and `7z` only when installing an encrypted package
+
+Installation, Microsoft/Xbox device-code authentication, and game launching all
+work from the terminal without GTK. The login command prints the sign-in URL and
+code even when no desktop dialog helper is available.
+
+### Optional desktop UI
+
+The setup UI and the GUI-first bootstrap additionally require GTK4, Libadwaita,
+and PyGObject. `qrencode` is optional and adds a QR code to the GUI sign-in
+dialog. The distribution commands below install both the CLI and GUI
+dependencies.
 
 ### Arch Linux
 
@@ -61,20 +75,30 @@ sudo apt install \
 
 ## Install
 
-The bootstrap script installs missing dependencies, verifies and downloads the
+### GUI bootstrap
+
+The bootstrap script installs the GUI dependencies, verifies and downloads the
 latest installer release to your user data directory, and opens the setup UI:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/veedy-dev/mcbe-gdk-installer/main/bootstrap.sh | bash
 ```
 
-### From source
+### Source checkout
 
 ```bash
 git clone https://github.com/veedy-dev/mcbe-gdk-installer.git
 cd mcbe-gdk-installer
+```
+
+Run the optional setup UI with:
+
+```bash
 ./gui.sh
 ```
+
+For a terminal-only setup, continue with one of the command-line installation
+methods below instead.
 
 ## Use
 
@@ -98,7 +122,9 @@ The app is also available as **MCBE GDK Installer** in compatible
 application launchers. Desktops that group XDG categories place it under
 **Games**; launchers used with Hyprland usually expose it through search.
 
-## Manual install
+## Command-line install
+
+### Encrypted package
 
 The terminal installer performs the same native Linux setup:
 
@@ -106,13 +132,41 @@ The terminal installer performs the same native Linux setup:
 ./easy-install.sh "/path/to/Minecraft-package.msixvc"
 ```
 
-If you already have a decrypted `Content` directory:
+### Existing decrypted files
+
+If Minecraft is already extracted and decrypted, pass its `Content` directory
+directly to the installer. The directory must contain `Minecraft.Windows.exe`:
 
 ```bash
-./install.sh "/path/to/decrypted/Content" --version 1.26.32.2
+./install.sh "/path/to/Minecraft for Windows/Content"
 ```
 
-Rerun the same command after `git pull` to update an existing installation.
+The version is optional metadata and can be supplied when known:
+
+```bash
+./install.sh "/path/to/Minecraft for Windows/Content" --version 1.26.32.2
+```
+
+`install.sh` uses the existing directory in place instead of copying it. Runtime
+setup can patch game binaries and DLLs, so keep a backup if the original files
+must remain unchanged. The script downloads and verifies the custom GDK-Proton
+engine, configures `umu`, creates an isolated profile, and installs the terminal
+commands under `~/.local/bin`.
+
+After installation, sign in and launch without opening the setup UI:
+
+```bash
+mcbe-gdk-linux-login
+mcbe-gdk-linux
+```
+
+Use `mcbe-gdk-linux-auth` to check account status and
+`mcbe-gdk-linux-logout` to remove the saved account. If `~/.local/bin` is not in
+`PATH`, invoke those commands with their full paths.
+
+Rerun the same installation command after `git pull` to update an existing
+installation.
+
 Set `MCBE_GDK_ENGINE_RELEASE=vX.Y.Z` to install a specific engine release for
 testing or rollback.
 
