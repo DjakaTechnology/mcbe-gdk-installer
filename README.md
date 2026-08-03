@@ -28,11 +28,22 @@ Minecraft Bedrock GDK builds installer on Linux with working Xbox authentication
 
 ## Requirements
 
+### Command-line installation and launch
+
 - x86_64 Linux
-- An authorized `/LT` test-crypted `.zip`, `.msixvc`, or `.msixv`
-- GTK4, Libadwaita, Python 3, PyGObject, and `cryptography`
-- `curl`, `tar`, `unzip`, `7z`, `sha256sum`, and `flock`
-- `qrencode` for the sign-in QR code
+- Python 3 and `cryptography`
+- `curl`, `tar`, `sha256sum`, and `flock`
+- `unzip` and `7z` only when installing from a package
+
+You can install the game, sign in, and launch it entirely from the terminal.
+GTK is not required. The login command always prints the Microsoft sign-in URL
+and code.
+
+### Optional desktop UI
+
+The graphical installer also needs GTK4, Libadwaita, and PyGObject. `qrencode`
+is optional and shows a QR code during sign-in. The commands below install
+everything needed for both terminal and graphical use.
 
 ### Arch Linux
 
@@ -61,20 +72,29 @@ sudo apt install \
 
 ## Install
 
-The bootstrap script installs missing dependencies, verifies and downloads the
-latest installer release to your user data directory, and opens the setup UI:
+### Graphical installer
+
+This command installs the required packages, downloads the latest release, and
+opens the graphical installer:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/veedy-dev/mcbe-gdk-installer/main/bootstrap.sh | bash
 ```
 
-### From source
+### Download the source
 
 ```bash
 git clone https://github.com/veedy-dev/mcbe-gdk-installer.git
 cd mcbe-gdk-installer
+```
+
+To open the graphical installer, run:
+
+```bash
 ./gui.sh
 ```
+
+For terminal-only use, choose one of the methods below instead.
 
 ## Use
 
@@ -98,21 +118,22 @@ The app is also available as **MCBE GDK Installer** in compatible
 application launchers. Desktops that group XDG categories place it under
 **Games**; launchers used with Hyprland usually expose it through search.
 
-## Manual install
+## Command-line install
 
-The terminal installer performs the same native Linux setup:
+### Install from a package
+
+Give the installer your `.zip`, `.msixvc`, or `.msixv` package:
 
 ```bash
 ./easy-install.sh "/path/to/Minecraft-package.msixvc"
 ```
 
-If you already have a decrypted `Content` directory:
+Already have the Minecraft game files? Follow
+[Use existing game files](docs/EXISTING_FILES.md).
 
-```bash
-./install.sh "/path/to/decrypted/Content" --version 1.26.32.2
-```
+Rerun the same installation command after `git pull` to update an existing
+installation.
 
-Rerun the same command after `git pull` to update an existing installation.
 Set `MCBE_GDK_ENGINE_RELEASE=vX.Y.Z` to install a specific engine release for
 testing or rollback.
 
@@ -130,6 +151,7 @@ testing or rollback.
 
 ## Documentation
 
+- [Use existing game files](docs/EXISTING_FILES.md)
 - [Native `/LT` package extraction](docs/DECRYPTION.md)
 - [Compatibility engine source](https://github.com/veedy-dev/mcbe-gdk-engine)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
