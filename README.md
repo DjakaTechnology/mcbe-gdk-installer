@@ -128,36 +128,8 @@ Give the installer your `.zip`, `.msixvc`, or `.msixv` package:
 ./easy-install.sh "/path/to/Minecraft-package.msixvc"
 ```
 
-### Use Minecraft files you already have
-
-If you already have the game files, find the folder containing
-`Minecraft.Windows.exe` and give that folder to the installer:
-
-```bash
-./install.sh "/path/to/Minecraft for Windows/Content"
-```
-
-If you know the game version, you can include it:
-
-```bash
-./install.sh "/path/to/Minecraft for Windows/Content" --version 1.26.32.2
-```
-
-The installer uses the files where they are instead of making another copy.
-Back them up first because setup changes some game files. It then downloads the
-required runtime, creates a separate profile, and adds the terminal commands to
-`~/.local/bin`.
-
-After installation, sign in and launch without opening the setup UI:
-
-```bash
-mcbe-gdk-linux-login
-mcbe-gdk-linux
-```
-
-Use `mcbe-gdk-linux-auth` to check account status and
-`mcbe-gdk-linux-logout` to remove the saved account. If your terminal reports
-that a command was not found, run it from `~/.local/bin`.
+Already have the Minecraft game files? Follow
+[Use existing game files](docs/EXISTING_FILES.md).
 
 Rerun the same installation command after `git pull` to update an existing
 installation.
@@ -179,6 +151,7 @@ testing or rollback.
 
 ## Documentation
 
+- [Use existing game files](docs/EXISTING_FILES.md)
 - [Native `/LT` package extraction](docs/DECRYPTION.md)
 - [Compatibility engine source](https://github.com/veedy-dev/mcbe-gdk-engine)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
