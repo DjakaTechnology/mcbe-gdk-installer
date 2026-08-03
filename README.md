@@ -31,22 +31,19 @@ Minecraft Bedrock GDK builds installer on Linux with working Xbox authentication
 ### Command-line installation and launch
 
 - x86_64 Linux
-- An existing decrypted `Content` directory, or an authorized `/LT`
-  test-crypted `.zip`, `.msixvc`, or `.msixv`
 - Python 3 and `cryptography`
 - `curl`, `tar`, `sha256sum`, and `flock`
-- `unzip` and `7z` only when installing an encrypted package
+- `unzip` and `7z` only when installing from a package
 
-Installation, Microsoft/Xbox device-code authentication, and game launching all
-work from the terminal without GTK. The login command prints the sign-in URL and
-code even when no desktop dialog helper is available.
+You can install the game, sign in, and launch it entirely from the terminal.
+GTK is not required. The login command always prints the Microsoft sign-in URL
+and code.
 
 ### Optional desktop UI
 
-The setup UI and the GUI-first bootstrap additionally require GTK4, Libadwaita,
-and PyGObject. `qrencode` is optional and adds a QR code to the GUI sign-in
-dialog. The distribution commands below install both the CLI and GUI
-dependencies.
+The graphical installer also needs GTK4, Libadwaita, and PyGObject. `qrencode`
+is optional and shows a QR code during sign-in. The commands below install
+everything needed for both terminal and graphical use.
 
 ### Arch Linux
 
@@ -75,30 +72,29 @@ sudo apt install \
 
 ## Install
 
-### GUI bootstrap
+### Graphical installer
 
-The bootstrap script installs the GUI dependencies, verifies and downloads the
-latest installer release to your user data directory, and opens the setup UI:
+This command installs the required packages, downloads the latest release, and
+opens the graphical installer:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/veedy-dev/mcbe-gdk-installer/main/bootstrap.sh | bash
 ```
 
-### Source checkout
+### Download the source
 
 ```bash
 git clone https://github.com/veedy-dev/mcbe-gdk-installer.git
 cd mcbe-gdk-installer
 ```
 
-Run the optional setup UI with:
+To open the graphical installer, run:
 
 ```bash
 ./gui.sh
 ```
 
-For a terminal-only setup, continue with one of the command-line installation
-methods below instead.
+For terminal-only use, choose one of the methods below instead.
 
 ## Use
 
@@ -124,34 +120,33 @@ application launchers. Desktops that group XDG categories place it under
 
 ## Command-line install
 
-### Encrypted package
+### Install from a package
 
-The terminal installer performs the same native Linux setup:
+Give the installer your `.zip`, `.msixvc`, or `.msixv` package:
 
 ```bash
 ./easy-install.sh "/path/to/Minecraft-package.msixvc"
 ```
 
-### Existing decrypted files
+### Use Minecraft files you already have
 
-If Minecraft is already extracted and decrypted, pass its `Content` directory
-directly to the installer. The directory must contain `Minecraft.Windows.exe`:
+If you already have the game files, find the folder containing
+`Minecraft.Windows.exe` and give that folder to the installer:
 
 ```bash
 ./install.sh "/path/to/Minecraft for Windows/Content"
 ```
 
-The version is optional metadata and can be supplied when known:
+If you know the game version, you can include it:
 
 ```bash
 ./install.sh "/path/to/Minecraft for Windows/Content" --version 1.26.32.2
 ```
 
-`install.sh` uses the existing directory in place instead of copying it. Runtime
-setup can patch game binaries and DLLs, so keep a backup if the original files
-must remain unchanged. The script downloads and verifies the custom GDK-Proton
-engine, configures `umu`, creates an isolated profile, and installs the terminal
-commands under `~/.local/bin`.
+The installer uses the files where they are instead of making another copy.
+Back them up first because setup changes some game files. It then downloads the
+required runtime, creates a separate profile, and adds the terminal commands to
+`~/.local/bin`.
 
 After installation, sign in and launch without opening the setup UI:
 
@@ -161,8 +156,8 @@ mcbe-gdk-linux
 ```
 
 Use `mcbe-gdk-linux-auth` to check account status and
-`mcbe-gdk-linux-logout` to remove the saved account. If `~/.local/bin` is not in
-`PATH`, invoke those commands with their full paths.
+`mcbe-gdk-linux-logout` to remove the saved account. If your terminal reports
+that a command was not found, run it from `~/.local/bin`.
 
 Rerun the same installation command after `git pull` to update an existing
 installation.
