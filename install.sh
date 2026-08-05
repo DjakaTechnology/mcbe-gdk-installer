@@ -7,7 +7,7 @@ ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/mcbe-gdk-linux"
 
 usage() {
   cat <<USAGE
-Usage: $0 /path/to/decrypted/Content [--version VERSION]
+Usage: $0 /path/to/decrypted/Content [--version VERSION] [--gui|--no-gui]
 
 The directory must contain Minecraft.Windows.exe from an authorized,
 decrypted Minecraft Bedrock GDK installation. This installer does not
@@ -18,9 +18,11 @@ USAGE
 [[ $# -ge 1 ]] || { usage; exit 2; }
 CONTENT="${1%/}"; shift
 VERSION="local"
+SHORTCUT_POLICY=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --version) VERSION="${2:?missing version}"; shift 2 ;;
+    --gui|--no-gui) SHORTCUT_POLICY="$1"; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage; exit 2 ;;
   esac
@@ -78,7 +80,9 @@ echo "Installing the MCBE GDK compatibility engine..."
 rm -rf "$ROOT/engine/GDK-Proton-mcbe-gdk"
 tar -xzf "$TMP/$ENGINE_ASSET" -C "$ROOT/engine"
 
-"$SCRIPT_DIR/scripts/install-launchers.sh" "$ROOT" "$SCRIPT_DIR"
+launcher_args=("$ROOT" "$SCRIPT_DIR")
+[[ -z "$SHORTCUT_POLICY" ]] || launcher_args+=("$SHORTCUT_POLICY")
+"$SCRIPT_DIR/scripts/install-launchers.sh" "${launcher_args[@]}"
 printf '%s\n' "$CONTENT" > "$ROOT/game-dir"
 ln -sfn "$CONTENT" "$ROOT/profile/content"
 

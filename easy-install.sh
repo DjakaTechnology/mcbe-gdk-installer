@@ -15,11 +15,13 @@ GDK_SHA256="dcf28e26ebf442e16fff05ab869e37534abd85111c8bfd22401905d647688adb"
 
 usage() {
   cat <<USAGE
-Usage: $0 /path/to/Minecraft-build.zip
-       $0 /path/to/Minecraft-package.msixvc
+Usage: $0 [--no-gui] /path/to/Minecraft-build.zip
+       $0 [--no-gui] /path/to/Minecraft-package.msixvc
 
 Decrypts and installs an authorized /LT test-crypted MCBE GDK package entirely
 on Linux. Retail or account-licensed MSIXVC packages are not supported.
+
+--no-gui  Do not add the installer GUI to the application menu.
 USAGE
 }
 
@@ -35,6 +37,11 @@ download() {
   mv "$output.part" "$output"
 }
 
+INSTALLER_SHORTCUT="--gui"
+case "${1:-}" in
+  --no-gui) INSTALLER_SHORTCUT="--no-gui"; shift ;;
+  -h|--help) usage; exit 0 ;;
+esac
 [[ $# -eq 1 ]] || { usage; exit 2; }
 PACKAGE="$(realpath "$1")"
 [[ -f "$PACKAGE" ]] || { echo "Build package not found: $PACKAGE" >&2; exit 1; }
@@ -45,6 +52,14 @@ esac
 for command in curl tar unzip grep sed find python3 sha256sum 7z; do
   command -v "$command" >/dev/null || { echo "$command is required." >&2; exit 1; }
 done
+
+if [[ "$INSTALLER_SHORTCUT" == "--gui" && -t 0 ]]; then
+  printf 'Add the installer GUI to the application menu? [Y/n] '
+  read -r answer || answer=""
+  case "${answer,,}" in
+    n|no) INSTALLER_SHORTCUT="--no-gui" ;;
+  esac
+fi
 
 ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/mcbe-gdk-linux"
 MCBE_GDK_ROOT="$ROOT" BOL_HOME="$ROOT/profile" \
@@ -187,7 +202,8 @@ if [[ -e "$GAME_DIR" ]]; then
   mv "$GAME_DIR" "$GAME_BACKUP"
 fi
 mv "$NEW_GAME" "$GAME_DIR"
-"${MCBE_GDK_INSTALLER:-$SCRIPT_DIR/install.sh}" "$GAME_DIR" --version "$VERSION"
+"${MCBE_GDK_INSTALLER:-$SCRIPT_DIR/install.sh}" \
+  "$GAME_DIR" --version "$VERSION" "$INSTALLER_SHORTCUT"
 if [[ -n "$GAME_BACKUP" ]]; then
   rm -rf "$GAME_BACKUP"
   GAME_BACKUP=""

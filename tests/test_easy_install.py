@@ -1,6 +1,7 @@
 """Smoke test for the native /LT package path."""
 
 import os
+import pty
 import subprocess
 import tempfile
 import unittest
@@ -77,7 +78,8 @@ esac
             cik.write_bytes(b"test-key")
             installer = root / "install"
             installer.write_text(
-                '#!/bin/sh\n[ -f "$1/Minecraft.Windows.exe" ] && printf "%s" "$3" > "$HOME/version"\n'
+                '#!/bin/sh\n[ -f "$1/Minecraft.Windows.exe" ] && '
+                'printf "%s\\n%s" "$3" "$4" > "$HOME/install-args"\n'
             )
             installer.chmod(0o755)
             installed = root / ".local/share/mcbe-gdk-linux"
@@ -88,19 +90,20 @@ esac
             world.mkdir(parents=True)
             (world / "level.dat").write_bytes(b"user-data")
 
+            env = {
+                **os.environ,
+                "HOME": str(root),
+                "XDG_DATA_HOME": str(root / ".local/share"),
+                "MCBE_GDK_ROOT": str(root / "runtime"),
+                "MCBE_GDK_XVD_DIR": str(xvd),
+                "MCBE_GDK_DOTNET_ROOT": str(dotnet),
+                "MCBE_GDK_CIK_FILE": str(cik),
+                "MCBE_GDK_INSTALLER": str(installer),
+            }
             subprocess.run(
-                [repo / "easy-install.sh", package],
+                [repo / "easy-install.sh", "--no-gui", package],
                 cwd=repo,
-                env={
-                    **os.environ,
-                    "HOME": str(root),
-                    "XDG_DATA_HOME": str(root / ".local/share"),
-                    "MCBE_GDK_ROOT": str(root / "runtime"),
-                    "MCBE_GDK_XVD_DIR": str(xvd),
-                    "MCBE_GDK_DOTNET_ROOT": str(dotnet),
-                    "MCBE_GDK_CIK_FILE": str(cik),
-                    "MCBE_GDK_INSTALLER": str(installer),
-                },
+                env=env,
                 check=True,
                 capture_output=True,
                 text=True,
@@ -110,7 +113,31 @@ esac
                 b"MZ",
             )
             self.assertEqual((world / "level.dat").read_bytes(), b"user-data")
-            self.assertEqual((root / "version").read_text(), "local")
+            self.assertEqual(
+                (root / "install-args").read_text().splitlines(),
+                ["local", "--no-gui"],
+            )
+
+            master, slave = pty.openpty()
+            try:
+                os.write(master, b"n\n")
+                prompted = subprocess.run(
+                    [repo / "easy-install.sh", package],
+                    cwd=repo,
+                    env=env,
+                    stdin=slave,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+            finally:
+                os.close(master)
+                os.close(slave)
+            self.assertIn("Add the installer GUI", prompted.stdout)
+            self.assertEqual(
+                (root / "install-args").read_text().splitlines(),
+                ["local", "--no-gui"],
+            )
 
 
 if __name__ == "__main__":

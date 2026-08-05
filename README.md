@@ -128,6 +128,10 @@ Give the installer your `.zip`, `.msixvc`, or `.msixv` package:
 ./easy-install.sh "/path/to/Minecraft-package.msixvc"
 ```
 
+Terminal installs ask whether to add the installer GUI to the application
+menu. Pass `--no-gui` before the package path to skip both the prompt and that
+shortcut; the Minecraft shortcut and `mcbe-gdk-linux` command are still added.
+
 Already have the Minecraft game files? Follow
 [Use existing game files](docs/EXISTING_FILES.md).
 

@@ -76,6 +76,26 @@ class CliTest(unittest.TestCase):
             self.assertIn(f"Exec={command} gui", installer_entry)
             self.assertIn(f"Exec={command} launch", game_entry)
 
+            installer_path = (
+                data / "applications/io.github.veedydev.MCBEGDKInstaller.desktop"
+            )
+            for policy in ("--no-gui", None):
+                args = [repo / "scripts/install-launchers.sh", root, repo]
+                if policy:
+                    args.append(policy)
+                subprocess.run(args, env=env, check=True, capture_output=True, text=True)
+                self.assertFalse(installer_path.exists())
+                self.assertTrue((root / ".no-gui-shortcut").exists())
+            subprocess.run(
+                [repo / "scripts/install-launchers.sh", root, repo, "--gui"],
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertTrue(installer_path.exists())
+            self.assertFalse((root / ".no-gui-shortcut").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

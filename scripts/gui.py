@@ -722,6 +722,7 @@ class Window(Adw.ApplicationWindow):
                     process = subprocess.Popen(
                         [str(installer), str(package.resolve())],
                         cwd=TOOL_ROOT,
+                        stdin=subprocess.DEVNULL,
                         stdout=subprocess.PIPE,
                         stderr=subprocess.STDOUT,
                         text=True,

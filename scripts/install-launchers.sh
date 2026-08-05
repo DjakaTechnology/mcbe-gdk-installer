@@ -3,10 +3,18 @@ set -euo pipefail
 
 ROOT="${1:?usage: install-launchers.sh ROOT SOURCE}"
 SOURCE="${2:?usage: install-launchers.sh ROOT SOURCE}"
+SHORTCUT_POLICY="${3:-}"
 BIN_DIR="$HOME/.local/bin"
 APPLICATIONS_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 
+[[ $# -le 3 ]] || { echo "usage: install-launchers.sh ROOT SOURCE [--gui|--no-gui]" >&2; exit 2; }
 mkdir -p "$ROOT/lib" "$ROOT/licenses" "$BIN_DIR" "$APPLICATIONS_DIR"
+case "$SHORTCUT_POLICY" in
+  --gui) rm -f "$ROOT/.no-gui-shortcut" ;;
+  --no-gui) touch "$ROOT/.no-gui-shortcut" ;;
+  "") ;;
+  *) echo "usage: install-launchers.sh ROOT SOURCE [--gui|--no-gui]" >&2; exit 2 ;;
+esac
 rm -rf "$ROOT/lib/auth" "$ROOT/lib/bol"
 cp -a "$SOURCE/auth" "$ROOT/lib/auth"
 install -m755 "$SOURCE/scripts/runtime.py" "$ROOT/lib/runtime.py"
@@ -48,8 +56,10 @@ elif [[ -f "$MINECRAFT_ICON" ]]; then
   MINECRAFT_ICON_VALUE="$MINECRAFT_ICON"
 fi
 
-rm -f "$APPLICATIONS_DIR/mcbe-gdk-linux.desktop"
-cat >"$APPLICATIONS_DIR/io.github.veedydev.MCBEGDKInstaller.desktop" <<EOF
+rm -f "$APPLICATIONS_DIR/mcbe-gdk-linux.desktop" \
+  "$APPLICATIONS_DIR/io.github.veedydev.MCBEGDKInstaller.desktop"
+if [[ ! -f "$ROOT/.no-gui-shortcut" ]]; then
+  cat >"$APPLICATIONS_DIR/io.github.veedydev.MCBEGDKInstaller.desktop" <<EOF
 [Desktop Entry]
 Type=Application
 Name=MCBE GDK Installer
@@ -64,6 +74,7 @@ X-KDE-Keywords=minecraft,bedrock,gdk,xbox,installer
 StartupNotify=true
 StartupWMClass=io.github.veedydev.MCBEGDKInstaller
 EOF
+fi
 
 cat >"$APPLICATIONS_DIR/io.github.veedydev.MinecraftBedrock.desktop" <<EOF
 [Desktop Entry]
