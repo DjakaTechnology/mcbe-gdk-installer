@@ -15,6 +15,7 @@ import tarfile
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from typing import Callable
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
@@ -23,6 +24,7 @@ ENGINE_REPO = "veedy-dev/mcbe-gdk-engine"
 VERSION_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 API_VERSION = "2022-11-28"
 MAX_RELEASE_JSON = 1_000_000
+ProgressCallback = Callable[[str, int | None, int | None], None]
 
 
 class UpdateError(RuntimeError):
@@ -151,7 +153,12 @@ def check_for_updates(tool_root: Path, root: Path) -> AvailableUpdates:
     )
 
 
-def _download(url: str, destination: Path, max_size: int) -> None:
+def _download(
+    url: str,
+    destination: Path,
+    max_size: int,
+    progress: Callable[[int, int | None], None] | None = None,
+) -> None:
     request = Request(url, headers={"User-Agent": "mcbe-gdk-installer"})
     try:
         with urlopen(request, timeout=30) as response, destination.open("wb") as output:
@@ -159,11 +166,15 @@ def _download(url: str, destination: Path, max_size: int) -> None:
             if declared > max_size:
                 raise UpdateError("Release asset is unexpectedly large.")
             total = 0
+            if progress:
+                progress(0, declared or None)
             while chunk := response.read(1024 * 1024):
                 total += len(chunk)
                 if total > max_size:
                     raise UpdateError("Release asset is unexpectedly large.")
                 output.write(chunk)
+                if progress:
+                    progress(total, declared or None)
     except (OSError, ValueError) as exc:
         raise UpdateError(f"Could not download the release: {exc}") from exc
 
@@ -194,12 +205,29 @@ def _verify_checksum(archive: Path, checksum: Path) -> None:
 
 
 def _download_verified(
-    release: Release, archive_name: str, directory: Path, max_size: int
+    release: Release,
+    archive_name: str,
+    directory: Path,
+    max_size: int,
+    component: str,
+    progress: ProgressCallback | None = None,
 ) -> Path:
     archive = directory / archive_name
     checksum = directory / f"{archive_name}.sha256"
-    _download(_asset(release, archive.name), archive, max_size)
+    download_progress = None
+    if progress:
+        download_progress = lambda current, total: progress(
+            f"{component}_download", current, total
+        )
+    _download(
+        _asset(release, archive.name),
+        archive,
+        max_size,
+        download_progress,
+    )
     _download(_asset(release, checksum.name), checksum, 4096)
+    if progress:
+        progress(f"{component}_verify", None, None)
     _verify_checksum(archive, checksum)
     return archive
 
@@ -236,7 +264,12 @@ def _replace_directory(source: Path, destination: Path) -> Path:
     return backup
 
 
-def install_installer_update(release: Release, tool_root: Path, root: Path) -> None:
+def install_installer_update(
+    release: Release,
+    tool_root: Path,
+    root: Path,
+    progress: ProgressCallback | None = None,
+) -> None:
     if not (tool_root / ".mcbe-managed-source").is_file():
         raise UpdateError("Open the release page to update a source checkout.")
     archive_name = f"mcbe-gdk-installer-{release.tag}.tar.gz"
@@ -244,7 +277,11 @@ def install_installer_update(release: Release, tool_root: Path, root: Path) -> N
         prefix=".installer-update.", dir=tool_root.parent
     ) as temporary:
         work = Path(temporary)
-        archive = _download_verified(release, archive_name, work, 25_000_000)
+        archive = _download_verified(
+            release, archive_name, work, 25_000_000, "installer", progress
+        )
+        if progress:
+            progress("installer_install", None, None)
         _validate_archive(archive, "mcbe-gdk-installer", links=False)
         subprocess.run(["tar", "-xzf", archive, "-C", work], check=True)
         source = work / "mcbe-gdk-installer"
@@ -266,9 +303,15 @@ def install_installer_update(release: Release, tool_root: Path, root: Path) -> N
             )
             raise
         shutil.rmtree(backup)
+        if progress:
+            progress("installer_done", None, None)
 
 
-def install_engine_update(release: Release, root: Path) -> None:
+def install_engine_update(
+    release: Release,
+    root: Path,
+    progress: ProgressCallback | None = None,
+) -> None:
     archive_name = f"GDK-Proton-mcbe-gdk-{release.tag}.tar.gz"
     engine_parent = root / "engine"
     engine_parent.mkdir(parents=True, exist_ok=True)
@@ -276,7 +319,11 @@ def install_engine_update(release: Release, root: Path) -> None:
         prefix=".engine-update.", dir=engine_parent
     ) as temporary:
         work = Path(temporary)
-        archive = _download_verified(release, archive_name, work, 1_500_000_000)
+        archive = _download_verified(
+            release, archive_name, work, 1_500_000_000, "engine", progress
+        )
+        if progress:
+            progress("engine_install", None, None)
         _validate_archive(archive, "GDK-Proton-mcbe-gdk", links=True)
         subprocess.run(["tar", "-xzf", archive, "-C", work], check=True)
         source = work / "GDK-Proton-mcbe-gdk"
@@ -291,6 +338,8 @@ def install_engine_update(release: Release, root: Path) -> None:
         destination = engine_parent / "GDK-Proton-mcbe-gdk"
         backup = _replace_directory(source, destination)
         shutil.rmtree(backup)
+        if progress:
+            progress("engine_done", None, None)
 
 
 def main(argv: list[str]) -> int:

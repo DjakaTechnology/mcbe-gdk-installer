@@ -111,6 +111,68 @@ def curl_progress_percent(line: str) -> int | None:
     return percent if 0 <= percent <= 100 else None
 
 
+def display_size(size: int) -> str:
+    if size >= 1024**3:
+        return f"{size / 1024**3:.1f} GB"
+    if size >= 1024**2:
+        return f"{size / 1024**2:.0f} MB"
+    if size >= 1024:
+        return f"{size / 1024:.0f} KB"
+    return f"{size} B"
+
+
+def update_progress_status(
+    stage: str,
+    current: int | None,
+    total: int | None,
+) -> tuple[str, str, float | None]:
+    title, subtitle = {
+        "engine_download": (
+            "Downloading compatibility engine…",
+            "This is the largest part of the update.",
+        ),
+        "engine_verify": (
+            "Verifying compatibility engine…",
+            "Checking the release checksum.",
+        ),
+        "engine_install": (
+            "Installing compatibility engine…",
+            "Extracting and replacing the runtime files.",
+        ),
+        "engine_done": (
+            "Compatibility engine updated",
+            "Finishing the remaining updates.",
+        ),
+        "installer_download": (
+            "Downloading MCBE GDK Installer…",
+            "Fetching the verified installer release.",
+        ),
+        "installer_verify": (
+            "Verifying MCBE GDK Installer…",
+            "Checking the release checksum.",
+        ),
+        "installer_install": (
+            "Installing MCBE GDK Installer…",
+            "Replacing the installer and refreshing launchers.",
+        ),
+        "installer_done": (
+            "MCBE GDK Installer updated",
+            "The update is complete.",
+        ),
+    }.get(stage, ("Installing updates…", "Working on the selected updates."))
+    if not stage.endswith("_download") or current is None:
+        return title, subtitle, None
+    if not total:
+        return title, f"{display_size(current)} downloaded.", None
+    fraction = min(current / total, 1)
+    percent = round(fraction * 100)
+    return (
+        title,
+        f"{percent}% · {display_size(current)} of {display_size(total)} downloaded.",
+        fraction,
+    )
+
+
 def configure_color_scheme() -> None:
     Gtk.init()
     settings = Gtk.Settings.get_default()
@@ -137,6 +199,9 @@ class Window(Adw.ApplicationWindow):
         self.was_updating = False
         self.available_updates: AvailableUpdates | None = None
         self.updating = False
+        self.update_pulsing = False
+        self.update_stage: str | None = None
+        self.update_log_bucket = -1
         self.launch_process: subprocess.Popen | None = None
         self.stopping = False
 
@@ -160,26 +225,50 @@ class Window(Adw.ApplicationWindow):
         )
         clamp.set_child(content)
 
-        self.update_banner = Adw.Banner(
+        self.update_group = Adw.PreferencesGroup(visible=False)
+        self.update_row = Adw.ActionRow(
             title="Update available",
-            button_label="Review",
-            revealed=False,
+            subtitle="Review changes before installing.",
         )
-        self.update_banner.set_button_style(Adw.BannerButtonStyle.SUGGESTED)
-        self.update_banner.connect("button-clicked", self.review_update)
-        self.update_box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL,
-            spacing=6,
-            visible=False,
+        self.update_row.add_prefix(
+            Gtk.Image(
+                icon_name="software-update-available-symbolic",
+                valign=Gtk.Align.CENTER,
+            )
         )
-        self.update_box.append(self.update_banner)
+        self.update_button = Gtk.Button(label="Review", valign=Gtk.Align.CENTER)
+        self.update_button.add_css_class("suggested-action")
+        self.update_button.connect("clicked", self.review_update)
+        self.update_spinner = Gtk.Spinner(visible=False, valign=Gtk.Align.CENTER)
+        self.update_row.add_suffix(self.update_spinner)
+        self.update_row.add_suffix(self.update_button)
+        self.update_group.add(self.update_row)
         self.update_progress = Gtk.ProgressBar(
             visible=False,
-            margin_start=8,
-            margin_end=8,
+            margin_top=8,
+            margin_bottom=4,
         )
-        self.update_box.append(self.update_progress)
-        content.append(self.update_box)
+        self.update_group.add(self.update_progress)
+        self.update_details = Gtk.Expander(label="Update details", visible=False)
+        update_log_scroll = Gtk.ScrolledWindow(
+            min_content_height=120,
+            max_content_height=200,
+            propagate_natural_height=True,
+        )
+        self.update_log = Gtk.TextView(
+            editable=False,
+            cursor_visible=False,
+            monospace=True,
+            wrap_mode=Gtk.WrapMode.WORD_CHAR,
+            left_margin=10,
+            right_margin=10,
+            top_margin=10,
+            bottom_margin=10,
+        )
+        update_log_scroll.set_child(self.update_log)
+        self.update_details.set_child(update_log_scroll)
+        self.update_group.add(self.update_details)
+        content.append(self.update_group)
 
         install_group = Adw.PreferencesGroup(title="Package")
         content.append(install_group)
@@ -298,17 +387,27 @@ class Window(Adw.ApplicationWindow):
         count = int(bool(updates.installer)) + int(bool(updates.engine))
         if updates.installer and updates.engine:
             title = "Installer and engine updates are available"
+            subtitle = (
+                f"Installer {updates.installer.tag} · "
+                f"Compatibility engine {updates.engine.tag}"
+            )
         elif updates.installer:
             title = f"MCBE GDK Installer {updates.installer.tag} is available"
+            subtitle = "Review changes before installing."
         else:
             assert updates.engine
             title = f"Compatibility engine {updates.engine.tag} is available"
-        self.update_banner.set_title(title)
-        self.update_banner.set_button_label("Review updates" if count > 1 else "Review")
-        self.update_box.set_visible(True)
-        self.update_banner.set_revealed(True)
+            subtitle = "Review changes before installing."
+        self.update_row.set_title(title)
+        self.update_row.set_subtitle(subtitle)
+        self.update_button.set_label("Review updates" if count > 1 else "Review")
+        self.update_button.set_visible(True)
+        self.update_spinner.set_visible(False)
+        self.update_progress.set_visible(False)
+        self.update_details.set_visible(False)
+        self.update_group.set_visible(True)
 
-    def review_update(self, _banner: Adw.Banner) -> None:
+    def review_update(self, _button: Gtk.Button) -> None:
         updates = self.available_updates
         if not updates or self.updating:
             return
@@ -377,10 +476,19 @@ class Window(Adw.ApplicationWindow):
             )
             return
         self.updating = True
-        self.update_banner.set_title("Downloading and verifying updates…")
-        self.update_banner.set_button_label("Updating…")
+        self.update_pulsing = True
+        self.update_stage = None
+        self.update_log_bucket = -1
+        self.update_row.set_title("Preparing updates…")
+        self.update_row.set_subtitle("Starting the verified update.")
+        self.update_button.set_visible(False)
+        self.update_spinner.set_visible(True)
+        self.update_spinner.start()
         self.update_progress.set_visible(True)
+        self.update_progress.set_fraction(0)
         self.update_progress.pulse()
+        self.update_details.set_visible(True)
+        self.update_log.get_buffer().set_text("Preparing selected updates…\n")
         GLib.timeout_add(120, self.pulse_update_progress)
         self.install_button.set_sensitive(False)
         self.login_button.set_sensitive(False)
@@ -389,11 +497,20 @@ class Window(Adw.ApplicationWindow):
 
         def worker() -> None:
             try:
+                def progress(
+                    stage: str,
+                    current: int | None,
+                    total: int | None,
+                ) -> None:
+                    self.events.put(("update_progress", stage, current, total))
+
                 with runtime_lock(ROOT):
                     if updates.engine:
-                        install_engine_update(updates.engine, ROOT)
+                        install_engine_update(updates.engine, ROOT, progress)
                     if updates.installer:
-                        install_installer_update(updates.installer, TOOL_ROOT, ROOT)
+                        install_installer_update(
+                            updates.installer, TOOL_ROOT, ROOT, progress
+                        )
                 self.events.put(("updates_done", bool(updates.installer)))
             except Exception as exc:
                 self.events.put(("update_error", str(exc)))
@@ -401,9 +518,42 @@ class Window(Adw.ApplicationWindow):
         threading.Thread(target=worker, daemon=True).start()
 
     def pulse_update_progress(self) -> bool:
-        if self.updating:
+        if self.updating and self.update_pulsing:
             self.update_progress.pulse()
         return self.updating
+
+    def write_update_detail(self, text: str) -> None:
+        buffer = self.update_log.get_buffer()
+        buffer.insert(buffer.get_end_iter(), text)
+        self.update_log.scroll_to_iter(buffer.get_end_iter(), 0, False, 0, 1)
+
+    def show_update_progress(
+        self,
+        stage: str,
+        current: int | None,
+        total: int | None,
+    ) -> None:
+        title, subtitle, fraction = update_progress_status(stage, current, total)
+        self.update_row.set_title(title)
+        self.update_row.set_subtitle(subtitle)
+        self.update_pulsing = fraction is None
+        if fraction is None:
+            self.update_progress.pulse()
+        else:
+            self.update_progress.set_fraction(fraction)
+
+        if stage != self.update_stage:
+            self.update_stage = stage
+            self.update_log_bucket = -1
+            self.write_update_detail(f"\n{title}\n")
+            if not stage.endswith("_download"):
+                self.write_update_detail(f"  {subtitle}\n")
+        if fraction is not None:
+            percent = round(fraction * 100)
+            bucket = percent // 10
+            if bucket > self.update_log_bucket:
+                self.update_log_bucket = bucket
+                self.write_update_detail(f"  {subtitle}\n")
 
     def prompt_restart(self) -> None:
         dialog = Adw.AlertDialog(
@@ -835,12 +985,16 @@ class Window(Adw.ApplicationWindow):
                         self.error("Sign in failed", "Microsoft sign-in did not complete.")
                 elif kind == "updates_available":
                     self.show_updates(event[1])
+                elif kind == "update_progress":
+                    self.show_update_progress(event[1], event[2], event[3])
                 elif kind == "updates_done":
                     self.updating = False
+                    self.update_pulsing = False
+                    self.update_spinner.stop()
+                    self.update_spinner.set_visible(False)
                     self.update_progress.set_visible(False)
                     self.available_updates = None
-                    self.update_banner.set_revealed(False)
-                    self.update_box.set_visible(False)
+                    self.update_group.set_visible(False)
                     self.refresh_install()
                     self.refresh_account()
                     if event[1]:
@@ -849,9 +1003,18 @@ class Window(Adw.ApplicationWindow):
                         self.toast("Compatibility engine updated")
                 elif kind == "update_error":
                     self.updating = False
+                    self.update_pulsing = False
+                    self.update_spinner.stop()
+                    self.update_spinner.set_visible(False)
                     self.update_progress.set_visible(False)
-                    self.update_banner.set_title("Update available")
-                    self.update_banner.set_button_label("Try again")
+                    self.update_row.set_title("Update failed")
+                    self.update_row.set_subtitle(
+                        "Open Update details for the error, then try again."
+                    )
+                    self.update_button.set_label("Try again")
+                    self.update_button.set_visible(True)
+                    self.update_details.set_visible(True)
+                    self.write_update_detail(f"\nError: {event[1]}\n")
                     self.install_button.set_sensitive(True)
                     self.login_button.set_sensitive(not msa_signed_in())
                     self.logout_button.set_sensitive(msa_signed_in())
@@ -909,4 +1072,9 @@ if __name__ == "__main__":
     )
     assert curl_progress_percent(" 88 798.7M 88 706.0M 0 0 34.62M") == 88
     assert curl_progress_percent("  % Total  % Received") is None
+    assert update_progress_status("engine_download", 419_430_400, 838_860_800) == (
+        "Downloading compatibility engine…",
+        "50% · 400 MB of 800 MB downloaded.",
+        0.5,
+    )
     main()

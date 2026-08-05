@@ -18,6 +18,7 @@ from updates import (  # noqa: E402
     INSTALLER_REPO,
     Release,
     UpdateError,
+    _download_verified,
     _validate_archive,
     _verify_checksum,
     check_for_updates,
@@ -136,6 +137,35 @@ class UpdateTests(unittest.TestCase):
                 bundle.addfile(info, io.BytesIO(b"x"))
             with self.assertRaises(UpdateError):
                 _validate_archive(unsafe, "mcbe-gdk-installer", links=False)
+
+    def test_verified_download_reports_progress_and_verification(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            latest = release(INSTALLER_REPO, "v0.1.3")
+            name = "mcbe-gdk-installer-v0.1.3.tar.gz"
+            data = b"verified release"
+            checksum = f"{hashlib.sha256(data).hexdigest()}  {name}\n".encode()
+            events = []
+            with patch(
+                "updates.urlopen",
+                side_effect=[Response(data), Response(checksum)],
+            ):
+                _download_verified(
+                    latest,
+                    name,
+                    root,
+                    1024,
+                    "installer",
+                    lambda *event: events.append(event),
+                )
+            self.assertEqual(
+                events,
+                [
+                    ("installer_download", 0, len(data)),
+                    ("installer_download", len(data), len(data)),
+                    ("installer_verify", None, None),
+                ],
+            )
 
 
 if __name__ == "__main__":
