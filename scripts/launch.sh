@@ -97,7 +97,6 @@ export __GL_SHADER_DISK_CACHE=1
 export __GL_SHADER_DISK_CACHE_PATH="$CACHE/nvidia"
 export __GL_SHADER_DISK_CACHE_SIZE=1073741824
 
-notify 'Launching Minecraft Bedrock…' 'Signing in to Xbox…'
 if ! python3 "$RUNTIME" prepare "$CONTENT" >> "$LOG" 2>&1; then
   notify 'MCBE GDK Installer sign-in/setup failed' "See $LOG"
   exit 1
