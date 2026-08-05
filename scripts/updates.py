@@ -133,7 +133,12 @@ def read_engine_version(root: Path) -> str | None:
         return "v0.0.0"
 
 
-def check_for_updates(tool_root: Path, root: Path) -> AvailableUpdates:
+def check_for_updates(
+    tool_root: Path,
+    root: Path,
+    *,
+    raise_if_unavailable: bool = False,
+) -> AvailableUpdates:
     try:
         installer = fetch_latest_release(INSTALLER_REPO)
     except UpdateError:
@@ -142,6 +147,8 @@ def check_for_updates(tool_root: Path, root: Path) -> AvailableUpdates:
         engine = fetch_latest_release(ENGINE_REPO)
     except UpdateError:
         engine = None
+    if raise_if_unavailable and installer is None and engine is None:
+        raise UpdateError("Could not check GitHub releases.")
     current_engine = read_engine_version(root)
     return AvailableUpdates(
         installer=installer
@@ -342,6 +349,69 @@ def install_engine_update(
             progress("engine_done", None, None)
 
 
+def install_available_updates(
+    updates: AvailableUpdates,
+    tool_root: Path,
+    root: Path,
+    progress: ProgressCallback | None = None,
+) -> bool:
+    if updates.engine:
+        install_engine_update(updates.engine, root, progress)
+    if updates.installer:
+        install_installer_update(updates.installer, tool_root, root, progress)
+    return bool(updates.installer)
+
+
+def _install_updates_cli(tool_root: Path, root: Path) -> int:
+    print("Checking for updates…")
+    updates = check_for_updates(tool_root, root, raise_if_unavailable=True)
+    if not updates:
+        print("No updates available.")
+        return 0
+
+    labels = {
+        "engine_download": "Downloading compatibility engine",
+        "engine_verify": "Verifying compatibility engine",
+        "engine_install": "Installing compatibility engine",
+        "engine_done": "Compatibility engine updated",
+        "installer_download": "Downloading MCBE GDK Installer",
+        "installer_verify": "Verifying MCBE GDK Installer",
+        "installer_install": "Installing MCBE GDK Installer",
+        "installer_done": "MCBE GDK Installer updated",
+    }
+    last_stage = ""
+    last_bucket = -1
+
+    def size_label(value: int) -> str:
+        if value >= 1024**2:
+            return f"{value / 1024**2:.0f} MB"
+        return f"{value / 1024:.0f} KB"
+
+    def progress(stage: str, current: int | None, total: int | None) -> None:
+        nonlocal last_stage, last_bucket
+        label = labels.get(stage, "Installing updates")
+        if stage != last_stage:
+            last_stage = stage
+            last_bucket = -1
+        if stage.endswith("_download") and current is not None and total:
+            percent = min(round(current / total * 100), 100)
+            bucket = percent // 10
+            if bucket == last_bucket:
+                return
+            last_bucket = bucket
+            print(
+                f"{label}: {percent}% "
+                f"({size_label(current)} of {size_label(total)})"
+            )
+        elif last_bucket < 0:
+            last_bucket = 0
+            print(f"{label}…")
+
+    install_available_updates(updates, tool_root, root, progress)
+    print("Updates installed.")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     if len(argv) == 3 and argv[1] == "latest-tag":
         try:
@@ -350,7 +420,19 @@ def main(argv: list[str]) -> int:
         except UpdateError as exc:
             print(f"Error: {exc}", file=sys.stderr)
             return 1
-    print(f"Usage: {argv[0]} latest-tag OWNER/REPOSITORY", file=sys.stderr)
+    if len(argv) == 4 and argv[1] == "install":
+        try:
+            return _install_updates_cli(
+                Path(argv[2]).expanduser().resolve(),
+                Path(argv[3]).expanduser().resolve(),
+            )
+        except (OSError, subprocess.SubprocessError, UpdateError) as exc:
+            print(f"Update failed: {exc}", file=sys.stderr)
+            return 1
+    print(
+        f"Usage: {argv[0]} latest-tag OWNER/REPOSITORY | install SOURCE ROOT",
+        file=sys.stderr,
+    )
     return 2
 
 

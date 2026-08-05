@@ -109,8 +109,8 @@ Click **Launch** to play without connecting an account. For Xbox services and
 multiplayer, click **Sign in**, then scan the QR code or enter the displayed
 Microsoft device code.
 
-When an installer or engine update is available, a banner appears above the
-Package section. Select **Review** to read the release changelog, then choose
+When an installer or engine update is available, an update row appears above
+the Package section. Select **Review** to read the release changelog, then choose
 **Install updates** or **Later**. Minecraft, worlds, settings, and account data
 are preserved.
 
@@ -141,12 +141,16 @@ testing or rollback.
 
 | Purpose | Command |
 | --- | --- |
-| Open setup UI | `./gui.sh` or `mcbe-gdk-linux-gui` |
+| Show command help | `mcbe-gdk-linux help` |
+| Open setup UI | `./gui.sh` or `mcbe-gdk-linux gui` |
 | Package-to-Linux setup | `./easy-install.sh /path/to/mcbe-gdk-build.msixvc` |
-| Launch Minecraft | `mcbe-gdk-linux` |
-| Check Xbox account | `mcbe-gdk-linux-auth` |
-| Sign in | `mcbe-gdk-linux-login` |
-| Sign out | `mcbe-gdk-linux-logout` |
+| Launch Minecraft | `mcbe-gdk-linux launch` or `mcbe-gdk-linux` |
+| Check Xbox account | `mcbe-gdk-linux status` |
+| Sign in | `mcbe-gdk-linux login` |
+| Sign out | `mcbe-gdk-linux logout` |
+| Install available updates | `mcbe-gdk-linux update` |
+| Recover after GPU troubleshooting | `mcbe-gdk-linux recover` |
+| Print the `COM_MOJANG` environment command | `mcbe-gdk-linux setup-env` |
 | Remove launchers | `./uninstall.sh` |
 
 ## Documentation

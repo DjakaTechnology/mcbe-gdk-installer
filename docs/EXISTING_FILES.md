@@ -23,21 +23,21 @@ downloads the required runtime and may take a while.
 After installation, launch directly:
 
 ```bash
-mcbe-gdk-linux
+mcbe-gdk-linux launch
 ```
 
 Xbox sign-in is optional. Connect first if you want Xbox services and
 multiplayer:
 
 ```bash
-mcbe-gdk-linux-login
+mcbe-gdk-linux login
 ```
 
 Other account commands:
 
 ```bash
-mcbe-gdk-linux-auth    # Check sign-in status
-mcbe-gdk-linux-logout  # Remove the saved account
+mcbe-gdk-linux status  # Check sign-in status
+mcbe-gdk-linux logout  # Remove the saved account
 ```
 
 If your terminal reports that a command was not found, run it from

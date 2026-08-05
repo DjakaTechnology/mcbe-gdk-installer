@@ -7,8 +7,8 @@ Wine, stock Proton, or the older non-xuser GDK-Proton build. Reset the isolated
 account, then launch again:
 
 ```bash
-mcbe-gdk-linux-logout
-mcbe-gdk-linux
+mcbe-gdk-linux logout
+mcbe-gdk-linux launch
 ```
 
 ## Native assertion at roughly 65% loading
@@ -25,10 +25,10 @@ addon, script, content-log, or debugger functionality.
 
 ## Launcher icon is clicked repeatedly before a window appears
 
-Xbox pre-authentication runs before Minecraft creates its window. The launcher
-uses a single-instance lock and desktop notifications, so click it once and
-wait for the startup notification. A second click reports that the client is
-already starting or running instead of launching another Wine session.
+Runtime preparation runs before Minecraft creates its window. The launcher
+uses a single-instance lock, so click it once and wait for the game window. A
+second click reports that the client is already starting or running instead of
+launching another Wine session.
 
 Startup failures are recorded in:
 
@@ -41,7 +41,7 @@ another launch during the same boot. Reboot once, then acknowledge the
 previous-boot marker:
 
 ```bash
-mcbe-gdk-linux-recover
+mcbe-gdk-linux recover
 ```
 
 ## Slow loading or stutter
@@ -56,7 +56,7 @@ creation and addon loading can remain slower than a stable retail client. To
 capture a diagnostic launch temporarily, run:
 
 ```bash
-BOL_DIAG=1 BOL_XCURL_LOG=1 mcbe-gdk-linux
+BOL_DIAG=1 BOL_XCURL_LOG=1 mcbe-gdk-linux launch
 ```
 
 ## Game does not appear in the application launcher

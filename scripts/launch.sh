@@ -15,7 +15,7 @@ CACHE="$BOL_HOME/graphics-cache"
 LOCK="$BOL_HOME/.desktop-launch.lock"
 PID_FILE="$BOL_HOME/.desktop-launch.pid"
 GPU_MARKER="$BOL_HOME/.gpu-launch-in-progress.json"
-RECOVER_CMD="mcbe-gdk-linux-recover"
+RECOVER_CMD="mcbe-gdk-linux recover"
 
 notify() {
   if command -v notify-send >/dev/null 2>&1; then

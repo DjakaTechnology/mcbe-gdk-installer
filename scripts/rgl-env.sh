@@ -14,7 +14,7 @@ case "${1:-}" in
     printf "set -gx COM_MOJANG '%s'\n" "$escaped"
     ;;
   -h|--help)
-    printf 'Usage: %s [--fish]\n' "$(basename "$0")"
+    printf 'Usage: mcbe-gdk-linux setup-env [--fish]\n'
     ;;
   *)
     printf 'Unknown argument: %s\n' "$1" >&2

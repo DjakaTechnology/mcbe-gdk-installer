@@ -6,6 +6,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -16,9 +17,11 @@ os.environ.setdefault("MCBE_GDK_ROOT", "/tmp/mcbe-gdk-update-tests")
 from updates import (  # noqa: E402
     ENGINE_REPO,
     INSTALLER_REPO,
+    AvailableUpdates,
     Release,
     UpdateError,
     _download_verified,
+    _install_updates_cli,
     _validate_archive,
     _verify_checksum,
     check_for_updates,
@@ -117,6 +120,13 @@ class UpdateTests(unittest.TestCase):
             self.assertEqual(available.installer.tag, "v0.1.3")
             self.assertIsNone(available.engine)
 
+            with patch(
+                "updates.fetch_latest_release",
+                side_effect=UpdateError("offline"),
+            ):
+                with self.assertRaises(UpdateError):
+                    check_for_updates(tool, root, raise_if_unavailable=True)
+
     def test_checksum_and_archive_paths_are_verified(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -166,6 +176,33 @@ class UpdateTests(unittest.TestCase):
                     ("installer_verify", None, None),
                 ],
             )
+
+    def test_cli_update_reports_component_progress(self):
+        installer = release(INSTALLER_REPO, "v0.1.3")
+        engine = release(ENGINE_REPO, "v0.1.4")
+        output = io.StringIO()
+
+        def install(updates, tool_root, root, progress):
+            self.assertEqual(updates.installer, installer)
+            progress("engine_download", 50 * 1024**2, 100 * 1024**2)
+            progress("engine_verify", None, None)
+            progress("engine_install", None, None)
+            progress("engine_done", None, None)
+            progress("installer_done", None, None)
+
+        with patch(
+            "updates.check_for_updates",
+            return_value=AvailableUpdates(installer=installer, engine=engine),
+        ), patch("updates.install_available_updates", side_effect=install):
+            with redirect_stdout(output):
+                result = _install_updates_cli(Path("/tool"), Path("/root"))
+
+        self.assertEqual(result, 0)
+        text = output.getvalue()
+        self.assertIn("Downloading compatibility engine: 50%", text)
+        self.assertIn("Verifying compatibility engine…", text)
+        self.assertIn("MCBE GDK Installer updated…", text)
+        self.assertIn("Updates installed.", text)
 
 
 if __name__ == "__main__":

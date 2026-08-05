@@ -186,7 +186,7 @@ def interrupted_launch_problem(path: Optional[Path] = None) -> Optional[str]:
     """
 
     marker = Path(path) if path is not None else GPU_LAUNCH_MARKER
-    command = "mcbe-gdk-linux-recover"
+    command = "mcbe-gdk-linux recover"
     try:
         marker.lstat()
     except FileNotFoundError:
@@ -263,7 +263,7 @@ def arm_gpu_launch(path: Optional[Path] = None) -> str:
         raise BolError(
             "A previous Minecraft GPU launch is still marked interrupted. "
             "After inspecting the interrupted session and rebooting, run "
-            "'mcbe-gdk-linux-recover' if no current graphics "
+            "'mcbe-gdk-linux recover' if no current graphics "
             "fault remains."
         ) from exc
     try:
@@ -651,7 +651,7 @@ def graphics_safety_problem(
         return (
             "the graphics driver reported a fatal kernel fault before the last "
             "reboot; after repairing/updating the driver, acknowledge it with "
-            "'mcbe-gdk-linux-recover'"
+            "'mcbe-gdk-linux recover'"
         )
     if _x11_session(env):
         providers = _xrandr_provider_count(env, xrandr_runner)

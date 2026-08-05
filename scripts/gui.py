@@ -43,8 +43,7 @@ from updates import (  # noqa: E402
     AvailableUpdates,
     UpdateError,
     check_for_updates,
-    install_engine_update,
-    install_installer_update,
+    install_available_updates,
 )
 
 APP_ID = "io.github.veedydev.MCBEGDKInstaller"
@@ -505,13 +504,10 @@ class Window(Adw.ApplicationWindow):
                     self.events.put(("update_progress", stage, current, total))
 
                 with runtime_lock(ROOT):
-                    if updates.engine:
-                        install_engine_update(updates.engine, ROOT, progress)
-                    if updates.installer:
-                        install_installer_update(
-                            updates.installer, TOOL_ROOT, ROOT, progress
-                        )
-                self.events.put(("updates_done", bool(updates.installer)))
+                    restart = install_available_updates(
+                        updates, TOOL_ROOT, ROOT, progress
+                    )
+                self.events.put(("updates_done", restart))
             except Exception as exc:
                 self.events.put(("update_error", str(exc)))
 

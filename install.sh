@@ -103,5 +103,5 @@ MCBE_GDK_ROOT="$ROOT" BOL_HOME="$ROOT/profile" PYTHONPATH="$ROOT/lib" \
 
 echo
 echo "Installed successfully."
-echo "Run: mcbe-gdk-linux-gui"
+echo "Run: mcbe-gdk-linux gui"
 echo "Microsoft/Xbox sign-in is optional."

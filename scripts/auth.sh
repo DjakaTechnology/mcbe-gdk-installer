@@ -10,14 +10,9 @@ LOCK="$BOL_HOME/.desktop-launch.lock"
 mkdir -p "$BOL_HOME"
 exec 9>"$LOCK"
 flock -n 9 || {
-  echo "Minecraft is starting or running; try again after it closes." >&2
+  echo "Minecraft or another account command is running; try again after it closes." >&2
   exit 1
 }
-
-case "$(basename "$0")" in
-  *-login|*-config) set -- login "$@" ;;
-  *-logout) set -- logout "$@" ;;
-esac
 
 if (($# == 0)); then
   set -- status
