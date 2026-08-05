@@ -9,6 +9,50 @@ from pathlib import Path
 
 
 class RuntimeSmokeTest(unittest.TestCase):
+    def test_login_code_opens_browser_and_uses_copyable_dialog(self):
+        repo = Path(__file__).resolve().parents[1]
+        code = """
+from unittest.mock import patch
+
+from scripts import runtime
+
+url = "https://www.microsoft.com/link"
+device_code = "ABCD1234"
+
+def which(name):
+    return f"/usr/bin/{name}" if name in {"xdg-open", "kdialog"} else None
+
+with patch.object(runtime.webbrowser, "open", return_value=False) as browser, \\
+     patch.object(runtime.shutil, "which", side_effect=which), \\
+     patch.object(runtime.subprocess, "Popen") as popen, \\
+     patch.object(runtime.subprocess, "run") as run:
+    run.return_value.returncode = 0
+    assert runtime._show_code(url, device_code)
+
+browser.assert_called_once_with(url)
+assert popen.call_args.args[0] == ["/usr/bin/xdg-open", url]
+dialog = run.call_args.args[0]
+assert "--inputbox" in dialog
+prompt_index = dialog.index("--inputbox")
+assert url in dialog[prompt_index + 1]
+assert dialog[prompt_index + 2] == device_code
+assert "Continue" in dialog
+
+with patch.object(runtime, "login", side_effect=KeyboardInterrupt):
+    assert runtime.main(["runtime.py", "login"]) == 130
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=repo,
+            env={**os.environ, "MCBE_GDK_ROOT": str(repo)},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertIn("Sign-in cancelled.", result.stderr)
+
     def test_gui_uses_the_installed_profile_for_auth(self):
         gui = (
             Path(__file__).resolve().parents[1] / "scripts" / "gui.py"

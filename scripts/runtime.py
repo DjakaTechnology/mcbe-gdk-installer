@@ -48,28 +48,69 @@ from auth.prefix import active_prefix, boot_prefix, ensure_umu, prefix_ready  # 
 from auth.wine_registry import reg_delete, update_prefix_registry  # noqa: E402
 
 
-def _show_code(url: str, code: str) -> None:
+def _show_code(url: str, code: str) -> bool:
     message = f"Open {url}\n\nEnter code: {code}"
+    prompt = (
+        "Your browser should open automatically.\n\n"
+        "Copy this code and complete sign-in, then click Continue.\n"
+        f"If it does not open, visit {url}."
+    )
+    keep_waiting = True
     try:
-        webbrowser.open(url)
+        opened = webbrowser.open(url)
     except Exception:
-        pass
+        opened = False
+    if not opened:
+        opener = shutil.which("xdg-open")
+        command = [opener, url] if opener else None
+        if not command and (opener := shutil.which("gio")):
+            command = [opener, "open", url]
+        if command:
+            subprocess.Popen(
+                command,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
     if shutil.which("kdialog"):
-        subprocess.run(
-            ["kdialog", "--title", "MCBE GDK Installer", "--msgbox", message],
+        result = subprocess.run(
+            [
+                "kdialog",
+                "--title",
+                "MCBE GDK Installer",
+                "--inputbox",
+                prompt,
+                code,
+                "--ok-label",
+                "Continue",
+                "--cancel-label",
+                "Cancel",
+            ],
             check=False,
+            stdout=subprocess.DEVNULL,
         )
+        keep_waiting = result.returncode == 0
     elif shutil.which("zenity"):
-        subprocess.run(
-            ["zenity", "--info", "--title=MCBE GDK Installer", f"--text={message}"],
+        result = subprocess.run(
+            [
+                "zenity",
+                "--entry",
+                "--title=MCBE GDK Installer",
+                f"--text={prompt}",
+                f"--entry-text={code}",
+                "--ok-label=Continue",
+                "--cancel-label=Cancel",
+            ],
             check=False,
+            stdout=subprocess.DEVNULL,
         )
+        keep_waiting = result.returncode == 0
     elif shutil.which("notify-send"):
         subprocess.run(
             ["notify-send", "MCBE GDK Installer sign-in", message],
             check=False,
         )
     print(message, flush=True)
+    return keep_waiting
 
 
 def login(on_code=None) -> bool:
@@ -77,7 +118,14 @@ def login(on_code=None) -> bool:
         print(f"Already signed in{': ' + msa_gamertag() if msa_gamertag() else ''}.")
         return True
     auth = NativeAuth()
-    auth._flow(on_code or _show_code, None)  # Synchronous device-code flow.
+
+    def default_callback(url: str, code: str) -> None:
+        if not _show_code(url, code):
+            auth.stop()
+
+    auth._flow(on_code or default_callback, None)  # Synchronous device-code flow.
+    if auth._stop and not msa_signed_in():
+        print("Sign-in cancelled.")
     return msa_signed_in()
 
 
@@ -191,6 +239,12 @@ def main(argv: list[str]) -> int:
         if not getattr(exc, "reported", False):
             print(f"Error: {exc}", file=sys.stderr)
         return 1
+    except KeyboardInterrupt:
+        print(
+            "\nSign-in cancelled." if command == "login" else "\nCancelled.",
+            file=sys.stderr,
+        )
+        return 130
 
 
 if __name__ == "__main__":
