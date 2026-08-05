@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/games/mcbe-gdk-linux"
+ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/mcbe-gdk-linux"
 export MCBE_GDK_ROOT="$ROOT"
 MCBE_GDK_TOOL_ROOT="$(cat "$ROOT/source-dir" 2>/dev/null || true)"
 export MCBE_GDK_TOOL_ROOT

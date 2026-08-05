@@ -46,7 +46,7 @@ for command in curl tar unzip grep sed find python3 sha256sum 7z; do
   command -v "$command" >/dev/null || { echo "$command is required." >&2; exit 1; }
 done
 
-ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/games/mcbe-gdk-linux"
+ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/mcbe-gdk-linux"
 MCBE_GDK_ROOT="$ROOT" BOL_HOME="$ROOT/profile" \
 PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}" \
   python3 "$SCRIPT_DIR/scripts/runtime.py" ensure-deps || {

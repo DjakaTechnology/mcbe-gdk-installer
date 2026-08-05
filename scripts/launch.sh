@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -uo pipefail
-ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/games/mcbe-gdk-linux"
+ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/mcbe-gdk-linux"
 export BOL_HOME="$ROOT/profile"
 export MCBE_GDK_ROOT="$ROOT"
 export PYTHONPATH="$ROOT/lib"

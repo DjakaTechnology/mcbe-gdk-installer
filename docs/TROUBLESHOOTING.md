@@ -33,7 +33,7 @@ already starting or running instead of launching another Wine session.
 Startup failures are recorded in:
 
 ```text
-~/.local/share/games/mcbe-gdk-linux/profile/logs/desktop-launch.log
+~/.local/share/mcbe-gdk-linux/profile/logs/desktop-launch.log
 ```
 
 If a previous GPU session was interrupted, the launcher deliberately blocks

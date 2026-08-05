@@ -41,7 +41,7 @@ esac
                 '#!/bin/sh\n[ -f "$1/Minecraft.Windows.exe" ] && printf "%s" "$3" > "$HOME/version"\n'
             )
             installer.chmod(0o755)
-            installed = root / ".local/share/games/mcbe-gdk-linux"
+            installed = root / ".local/share/mcbe-gdk-linux"
             game = installed / "game"
             game.mkdir(parents=True)
             (game / "Minecraft.Windows.exe").write_bytes(b"old")
@@ -55,6 +55,7 @@ esac
                 env={
                     **os.environ,
                     "HOME": str(root),
+                    "XDG_DATA_HOME": str(root / ".local/share"),
                     "MCBE_GDK_ROOT": str(root / "runtime"),
                     "MCBE_GDK_XVD_DIR": str(xvd),
                     "MCBE_GDK_DOTNET_ROOT": str(dotnet),
@@ -66,7 +67,7 @@ esac
                 text=True,
             )
             self.assertEqual(
-                (root / ".local/share/games/mcbe-gdk-linux/game/Minecraft.Windows.exe").read_bytes(),
+                (root / ".local/share/mcbe-gdk-linux/game/Minecraft.Windows.exe").read_bytes(),
                 b"MZ",
             )
             self.assertEqual((world / "level.dat").read_bytes(), b"user-data")

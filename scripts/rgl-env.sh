@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/games/mcbe-gdk-linux"
+ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/mcbe-gdk-linux"
 BASE="$ROOT/profile/compatdata/pfx/drive_c/users/steamuser/AppData/Roaming/Minecraft Bedrock/Users/Shared/games/com.mojang"
 mkdir -p "$BASE"
 

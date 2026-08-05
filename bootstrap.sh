@@ -3,7 +3,7 @@ set -euo pipefail
 
 REPO="veedy-dev/mcbe-gdk-installer"
 SOURCE_DIR="${MCBE_GDK_SOURCE_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/mcbe-gdk-installer/source}"
-ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/games/mcbe-gdk-linux"
+ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/mcbe-gdk-linux"
 
 run_root() {
   if (( EUID == 0 )); then
