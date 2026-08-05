@@ -98,7 +98,7 @@ export __GL_SHADER_DISK_CACHE_PATH="$CACHE/nvidia"
 export __GL_SHADER_DISK_CACHE_SIZE=1073741824
 
 if ! python3 "$RUNTIME" prepare "$CONTENT" >> "$LOG" 2>&1; then
-  notify 'MCBE GDK Installer sign-in/setup failed' "See $LOG"
+  notify 'MCBE GDK Installer setup failed' "See $LOG"
   exit 1
 fi
 [[ -x "$UMU" ]] || {

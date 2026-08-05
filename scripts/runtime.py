@@ -102,10 +102,9 @@ def prepare(game_dir: Path) -> None:
     exe = game_dir / "Minecraft.Windows.exe"
     if not exe.is_file():
         raise BolError(f"Missing game executable: {exe}")
-    if ensure_login_deps():
+    signed_in = msa_signed_in()
+    if signed_in and ensure_login_deps():
         raise BolError("Python package 'cryptography' is required for Xbox sign-in.")
-    if not msa_signed_in() and not login():
-        raise BolError("Microsoft sign-in did not complete.")
 
     install_gdk_xbox_dlls(game_dir)
     fix_curl_ssl(game_dir)
@@ -115,6 +114,14 @@ def prepare(game_dir: Path) -> None:
     _install_cryptbase_in_prefix()
     install_gameinput(active_prefix(), game_dir)
     wine_apply_winegdk_prereqs()
+
+    if not signed_in:
+        update_prefix_registry(
+            active_prefix(),
+            machine=[reg_delete(WINEGDK_REG, "RefreshToken")],
+        )
+        bump_stack_reserve(exe)
+        return
 
     account, epoch = msa_session_snapshot()
     refresh_token = account.get("refresh_token")

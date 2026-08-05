@@ -16,7 +16,7 @@ Minecraft Bedrock GDK builds installer on Linux with working Xbox authentication
 - Notifies you about installer and compatibility-engine updates
 - Decrypts `/LT` test-crypted development packages entirely on Linux
 - Installs the latest verified MCBE-compatible GDK-Proton xuser engine
-- Opens Microsoft device-code sign-in automatically when needed
+- Supports optional Microsoft device-code sign-in for Xbox services
 - Launches through `umu`
 - Keeps its profile separate from other Minecraft installations
 - Installs XDG entries for the installer and Minecraft Bedrock
@@ -31,7 +31,7 @@ Minecraft Bedrock GDK builds installer on Linux with working Xbox authentication
 ### Command-line installation and launch
 
 - x86_64 Linux
-- Python 3 and `cryptography`
+- Python 3 (`cryptography` is only needed for Xbox sign-in)
 - `curl`, `tar`, `sha256sum`, and `flock`
 - `unzip` and `7z` only when installing from a package
 
@@ -105,9 +105,9 @@ The first run temporarily downloads the official Microsoft GDK archive.
 Installing a newer build replaces only the game files; the isolated account,
 worlds, and profile data are preserved.
 
-In the UI, click **Sign in**. Scan the QR code or open the displayed URL, then
-enter the Microsoft device code. Click **Launch** when the account is
-connected.
+Click **Launch** to play without connecting an account. For Xbox services and
+multiplayer, click **Sign in**, then scan the QR code or enter the displayed
+Microsoft device code.
 
 When an installer or engine update is available, a banner appears above the
 Package section. Select **Review** to read the release changelog, then choose

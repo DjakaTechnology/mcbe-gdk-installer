@@ -20,11 +20,17 @@ The installer uses the files where they are instead of making another copy.
 Back them up first because setup changes some game files. The first setup also
 downloads the required runtime and may take a while.
 
-After installation, sign in and launch:
+After installation, launch directly:
+
+```bash
+mcbe-gdk-linux
+```
+
+Xbox sign-in is optional. Connect first if you want Xbox services and
+multiplayer:
 
 ```bash
 mcbe-gdk-linux-login
-mcbe-gdk-linux
 ```
 
 Other account commands:

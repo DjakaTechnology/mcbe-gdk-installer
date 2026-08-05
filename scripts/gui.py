@@ -605,7 +605,7 @@ class Window(Adw.ApplicationWindow):
         self.account_row.set_subtitle(
             "Xbox authentication is ready."
             if signed_in
-            else "Connect the account authorized for this build."
+            else "Optional. Connect for Xbox services and multiplayer."
         )
         self.account_icon.set_from_icon_name(
             "emblem-ok-symbolic" if signed_in else "avatar-default-symbolic"
@@ -621,8 +621,7 @@ class Window(Adw.ApplicationWindow):
 
         def worker() -> None:
             try:
-                with runtime_lock(ROOT):
-                    result = login(on_code)
+                result = login(on_code)
                 self.events.put(("login_done", result))
             except Exception as exc:
                 self.events.put(("error", f"Sign in failed: {exc}"))

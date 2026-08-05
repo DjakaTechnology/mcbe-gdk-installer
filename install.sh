@@ -61,10 +61,11 @@ json_escape() {
   printf '%s' "$value"
 }
 
-# Known Wine/GDK workaround. Preserve the file instead of deleting it.
-if [[ -f "$CONTENT/Microsoft.WindowsAppRuntime.Bootstrap.dll" ]]; then
-  mv "$CONTENT/Microsoft.WindowsAppRuntime.Bootstrap.dll" \
-     "$CONTENT/Microsoft.WindowsAppRuntime.Bootstrap.dll.disabled"
+# Restore the runtime DLL disabled by earlier installer releases.
+if [[ ! -f "$CONTENT/Microsoft.WindowsAppRuntime.Bootstrap.dll" &&
+      -f "$CONTENT/Microsoft.WindowsAppRuntime.Bootstrap.dll.disabled" ]]; then
+  mv "$CONTENT/Microsoft.WindowsAppRuntime.Bootstrap.dll.disabled" \
+     "$CONTENT/Microsoft.WindowsAppRuntime.Bootstrap.dll"
 fi
 
 echo "Downloading the MCBE GDK compatibility engine..."
@@ -103,4 +104,4 @@ MCBE_GDK_ROOT="$ROOT" BOL_HOME="$ROOT/profile" PYTHONPATH="$ROOT/lib" \
 echo
 echo "Installed successfully."
 echo "Run: mcbe-gdk-linux-gui"
-echo "Microsoft/Xbox sign-in opens automatically when needed."
+echo "Microsoft/Xbox sign-in is optional."
