@@ -415,8 +415,9 @@ class Window(Adw.ApplicationWindow):
         )
         changelog = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
-            spacing=14,
-            margin_top=6,
+            spacing=10,
+            margin_top=4,
+            margin_end=8,
         )
         releases = [
             ("MCBE GDK Installer", updates.installer),
@@ -438,16 +439,15 @@ class Window(Adw.ApplicationWindow):
                 label=release.body.strip() or "Maintenance and compatibility improvements.",
                 xalign=0,
                 wrap=True,
-                wrap_mode=Gtk.WrapMode.WORD_CHAR,
                 selectable=True,
-                max_width_chars=68,
+                max_width_chars=52,
             )
             notes.add_css_class("dim-label")
             changelog.append(notes)
             shown += 1
         scroll = Gtk.ScrolledWindow(
-            min_content_height=170,
-            max_content_height=300,
+            min_content_height=110,
+            max_content_height=220,
             propagate_natural_height=True,
         )
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
