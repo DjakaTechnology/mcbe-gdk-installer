@@ -235,7 +235,7 @@ class Window(Adw.ApplicationWindow):
                 valign=Gtk.Align.CENTER,
             )
         )
-        self.update_button = Gtk.Button(label="Review", valign=Gtk.Align.CENTER)
+        self.update_button = Gtk.Button(label="Update", valign=Gtk.Align.CENTER)
         self.update_button.add_css_class("suggested-action")
         self.update_button.connect("clicked", self.review_update)
         self.update_spinner = Gtk.Spinner(visible=False, valign=Gtk.Align.CENTER)
@@ -383,7 +383,6 @@ class Window(Adw.ApplicationWindow):
 
     def show_updates(self, updates: AvailableUpdates) -> None:
         self.available_updates = updates
-        count = int(bool(updates.installer)) + int(bool(updates.engine))
         if updates.installer and updates.engine:
             title = "Installer and engine updates are available"
             subtitle = (
@@ -399,7 +398,7 @@ class Window(Adw.ApplicationWindow):
             subtitle = "Review changes before installing."
         self.update_row.set_title(title)
         self.update_row.set_subtitle(subtitle)
-        self.update_button.set_label("Review updates" if count > 1 else "Review")
+        self.update_button.set_label("Update")
         self.update_button.set_visible(True)
         self.update_spinner.set_visible(False)
         self.update_progress.set_visible(False)

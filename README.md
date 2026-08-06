@@ -110,7 +110,7 @@ multiplayer, click **Sign in**, then scan the QR code or enter the displayed
 Microsoft device code.
 
 When an installer or engine update is available, an update row appears above
-the Package section. Select **Review** to read the release changelog, then choose
+the Package section. Select **Update** to review the release changelog, then choose
 **Install updates** or **Later**. Minecraft, worlds, settings, and account data
 are preserved.
 
