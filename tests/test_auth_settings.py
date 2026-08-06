@@ -85,6 +85,57 @@ class WineGdkPrerequisiteTests(unittest.TestCase):
             self.assertEqual((prefix / "system.reg").read_bytes(), system_once)
             self.assertEqual((prefix / "user.reg").read_bytes(), user_once)
 
+    def test_engine_upgrade_refreshes_cached_dlls_and_preserves_profile(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            engine = root / "engine/GDK-Proton-mcbe-gdk"
+            source64 = engine / "files/lib/wine/x86_64-windows"
+            source32 = engine / "files/lib/wine/i386-windows"
+            source64.mkdir(parents=True)
+            source32.mkdir(parents=True)
+            (source64 / "ntdll.dll").write_bytes(b"new-64")
+            (source64 / "engine-only.dll").write_bytes(b"not-cached")
+            (source32 / "user32.dll").write_bytes(b"new-32")
+            commit = "a" * 40
+            (engine / "engine-manifest.json").write_text(json.dumps({
+                "version": "v0.1.7",
+                "source": {"commit": commit},
+            }))
+
+            compat = root / "profile/compatdata"
+            pfx = compat / "pfx"
+            system32 = pfx / "drive_c/windows/system32"
+            syswow64 = pfx / "drive_c/windows/syswow64"
+            system32.mkdir(parents=True)
+            syswow64.mkdir(parents=True)
+            (pfx / "system.reg").write_bytes(_UPGRADED_SYSTEM_REG)
+            (pfx / "user.reg").write_bytes(_UPGRADED_USER_REG)
+            (system32 / "ntdll.dll").write_bytes(b"old-64")
+            (syswow64 / "user32.dll").write_bytes(b"old-32")
+            account = pfx / "drive_c/users/steamuser/account.json"
+            account.parent.mkdir(parents=True)
+            account.write_bytes(b"preserved")
+
+            with mock.patch.dict(os.environ, {
+                    "MCBE_GDK_ROOT": str(root), "BOL_WINEPREFIX": ""}), \
+                    mock.patch.object(prefix, "PFX", pfx), \
+                    mock.patch.object(prefix, "COMPAT", compat), \
+                    mock.patch.object(prefix, "proton_path",
+                                      return_value=engine), \
+                    mock.patch.object(prefix, "require_prefix_idle") as idle, \
+                    mock.patch.object(prefix,
+                                      "repair_managed_prefix_user32"):
+                self.assertTrue(prefix.boot_prefix(pfx))
+
+            self.assertEqual((system32 / "ntdll.dll").read_bytes(), b"new-64")
+            self.assertEqual((syswow64 / "user32.dll").read_bytes(), b"new-32")
+            self.assertFalse((system32 / "engine-only.dll").exists())
+            self.assertEqual(account.read_bytes(), b"preserved")
+            self.assertEqual(
+                prefix.read_managed_engine_rev(pfx), f"v0.1.7:{commit}")
+            idle.assert_called_once_with(
+                pfx, "refresh the managed Wine runtime")
+
 
 
 

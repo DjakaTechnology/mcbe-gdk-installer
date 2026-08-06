@@ -1,8 +1,10 @@
 # Authentication runtime
 
 Selected MIT-licensed authentication and WineGDK runtime modules from
-[Wyze3306/BedrockOnLinux](https://github.com/Wyze3306/BedrockOnLinux), pinned
-at commit `27ade9259384828eb6d57d8dd6441720b2859f59`.
+[Wyze3306/BedrockOnLinux](https://github.com/Wyze3306/BedrockOnLinux), with
+the managed-prefix runtime refresh adapted from commit
+`6ef05d90d88ebefff445d04480712eb80057e2f1`. The original imported subset was
+pinned at commit `27ade9259384828eb6d57d8dd6441720b2859f59`.
 
 `auth/config.py` uses the `mcbe-gdk-linux` application name, the unused
 `relocation` import is removed from `auth/__init__.py`, and the dependency error

@@ -62,6 +62,13 @@ with patch.object(runtime, "login", side_effect=KeyboardInterrupt):
             gui.index("from auth.auth import"),
         )
 
+    def test_launcher_does_not_override_system_tls_policy(self):
+        launch = (
+            Path(__file__).resolve().parents[1] / "scripts" / "launch.sh"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("GNUTLS_SYSTEM_PRIORITY_FILE", launch)
+        self.assertNotIn("gnutls-no-tls13", launch)
+
     def test_fresh_profile_is_signed_out(self):
         repo = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmp:

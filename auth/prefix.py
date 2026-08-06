@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 import hashlib
+import json
 import fcntl
 import os
 import shutil
@@ -28,11 +29,18 @@ from .config import (
     UMU_REPO,
     UMU_RUN_SHA256,
     UMU_VERSION,
+    WINEGDK_BUILD_REV,
     WINEGDK_OUT,
 )
 from .log import BolError, die, info, ok, warn
 from .proton import proton_path
 from .util import download
+
+ENGINE_REV_MARKER = ".mcbe-gdk-engine-rev"
+_MANAGED_RUNTIME_ARCH_DIRS = (
+    ("files/lib/wine/x86_64-windows", "drive_c/windows/system32"),
+    ("files/lib/wine/i386-windows", "drive_c/windows/syswow64"),
+)
 
 def ensure_umu(force=False):
     binp = UMU_DIR / "umu-run"
@@ -307,6 +315,9 @@ def boot_prefix(prefix=None):
     pfx = Path(prefix or active_prefix())
     _prepare_managed_prefix_layout(pfx)
     if prefix_ready(pfx):
+        if managed_prefix_engine_is_stale(pfx):
+            refresh_managed_prefix_runtime(pfx)
+            _record_managed_engine_rev(pfx)
         repair_managed_prefix_user32(pfx)
         return True
     # Refuse a known-bad graphics session before Wine can open a device.
@@ -354,6 +365,7 @@ def boot_prefix(prefix=None):
         warn("Wine prefix initialisation finished without valid system.reg, "
              f"user.reg, and system32 state. Details: {log_path}")
         return False
+    _record_managed_engine_rev(pfx)
     repair_managed_prefix_user32(pfx)
     return True
 
@@ -398,6 +410,164 @@ def _sha256_path(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _managed_engine_paths():
+    paths = {WINEGDK_OUT.resolve(strict=False)}
+    root = os.environ.get("MCBE_GDK_ROOT", "").strip()
+    if root:
+        paths.add((Path(root) / "engine/GDK-Proton-mcbe-gdk").resolve(
+            strict=False))
+    return paths
+
+
+def _managed_runtime_guards(pfx, engine):
+    """True only for this application's managed prefix and engine."""
+    if os.environ.get("BOL_WINEPREFIX", "").strip() or engine is None:
+        return False
+    try:
+        return Path(pfx).resolve(strict=False) == PFX.resolve(strict=False) \
+            and Path(engine).resolve(strict=False) in _managed_engine_paths()
+    except (OSError, RuntimeError):
+        return False
+
+
+def _managed_engine_revision(engine):
+    """Return a stable identity for the installed, verified engine."""
+    path = Path(engine)
+    if path.resolve(strict=False) == WINEGDK_OUT.resolve(strict=False):
+        return WINEGDK_BUILD_REV
+    try:
+        manifest = json.loads(
+            (path / "engine-manifest.json").read_text(encoding="utf-8"))
+        version = manifest["version"]
+        commit = manifest["source"]["commit"]
+        if not isinstance(version, str) or not isinstance(commit, str) \
+                or len(commit) != 40:
+            return None
+        return f"{version}:{commit}"
+    except (KeyError, OSError, TypeError, ValueError):
+        return None
+
+
+def _engine_rev_marker(pfx):
+    return Path(pfx) / ENGINE_REV_MARKER
+
+
+def read_managed_engine_rev(pfx):
+    try:
+        return _engine_rev_marker(pfx).read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+
+
+def _record_managed_engine_rev(pfx):
+    engine = proton_path()
+    if not _managed_runtime_guards(pfx, engine):
+        return
+    revision = _managed_engine_revision(engine)
+    if revision:
+        try:
+            _engine_rev_marker(pfx).write_text(
+                revision + "\n", encoding="utf-8")
+        except OSError:
+            pass
+
+
+def managed_prefix_engine_is_stale(prefix=None):
+    pfx = Path(prefix or PFX)
+    engine = proton_path()
+    if not _managed_runtime_guards(pfx, engine):
+        return False
+    revision = _managed_engine_revision(engine)
+    return bool(revision and read_managed_engine_rev(pfx) != revision)
+
+
+def _replace_managed_dll(source, target):
+    source_hash = _sha256_path(source)
+    if target.is_file() and not target.is_symlink():
+        try:
+            if _sha256_path(target) == source_hash:
+                return False
+        except OSError:
+            pass
+    backup = target.with_name(target.name + ".mcbe-runtime-backup")
+    if not (backup.exists() or backup.is_symlink()):
+        if target.is_symlink():
+            backup.symlink_to(os.readlink(target))
+        elif target.exists():
+            if not target.is_file():
+                raise BolError(
+                    f"The managed prefix has a non-regular runtime file: "
+                    f"{target.name}")
+            try:
+                os.link(target, backup, follow_symlinks=False)
+            except OSError:
+                shutil.copy2(target, backup, follow_symlinks=False)
+    fd, staged_name = tempfile.mkstemp(
+        prefix=".mcbe-runtime-", dir=target.parent)
+    os.close(fd)
+    staged = Path(staged_name)
+    try:
+        shutil.copy2(source, staged, follow_symlinks=False)
+        if _sha256_path(staged) != source_hash:
+            raise BolError(
+                f"The managed runtime refresh failed integrity checking for "
+                f"{target.name}.")
+        os.replace(staged, target)
+    finally:
+        staged.unlink(missing_ok=True)
+    return True
+
+
+def refresh_managed_prefix_runtime(prefix=None):
+    """Refresh cached Wine DLLs after a managed engine upgrade."""
+    engine = proton_path()
+    pfx = Path(prefix or PFX)
+    if not _managed_runtime_guards(pfx, engine):
+        return False
+    if pfx.is_symlink():
+        raise BolError(
+            "The managed Wine prefix is an unsafe symbolic link; "
+            "run Install / Update to rebuild its local layout.")
+    try:
+        resolved_root = pfx.resolve(strict=True)
+        operations = []
+        for engine_rel, prefix_rel in _MANAGED_RUNTIME_ARCH_DIRS:
+            source_dir = Path(engine) / engine_rel
+            target_dir = pfx / prefix_rel
+            if not source_dir.is_dir() or not target_dir.is_dir():
+                continue
+            if target_dir.is_symlink():
+                raise BolError(
+                    "The managed Wine prefix has an unsafe system link; "
+                    "run Install / Update to rebuild it.")
+            target_dir.resolve(strict=True).relative_to(resolved_root)
+            for source in sorted(source_dir.glob("*.dll")):
+                target = target_dir / source.name
+                if target.exists() or target.is_symlink():
+                    operations.append((source, target))
+    except BolError:
+        raise
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise BolError(
+            "The managed Wine prefix has an unsafe system layout; "
+            "run Install / Update to rebuild it.") from exc
+
+    changed = False
+    for source, target in operations:
+        if not changed and target.is_file() and not target.is_symlink():
+            try:
+                if _sha256_path(source) == _sha256_path(target):
+                    continue
+            except OSError:
+                pass
+        if not changed:
+            require_prefix_idle(pfx, "refresh the managed Wine runtime")
+        changed |= _replace_managed_dll(source, target)
+    if changed:
+        ok("Managed Wine runtime refreshed for the installed engine.")
+    return changed
+
+
 def repair_managed_prefix_user32(prefix=None):
     """Restore the managed prefix's 64-bit user32 from the verified engine."""
     if os.environ.get("BOL_WINEPREFIX", "").strip():
@@ -406,12 +576,7 @@ def repair_managed_prefix_user32(prefix=None):
     engine = proton_path()
     if engine is None:
         return False
-    try:
-        if pfx.resolve(strict=False) != PFX.resolve(strict=False) \
-                or Path(engine).resolve(strict=False) != \
-                WINEGDK_OUT.resolve(strict=False):
-            return False
-    except (OSError, RuntimeError):
+    if not _managed_runtime_guards(pfx, engine):
         return False
 
     source = (Path(engine) / "files/lib/wine/x86_64-windows/user32.dll")
