@@ -9,6 +9,7 @@ pinned at commit `27ade9259384828eb6d57d8dd6441720b2859f59`.
 `auth/config.py` uses the `mcbe-gdk-linux` application name, the unused
 `relocation` import is removed from `auth/__init__.py`, and the dependency error
 mentions Arch Linux's package name. Runtime/recovery messages use this
-project's command names. Managed-engine and legacy-data migration code is
-omitted because this project supplies fixed engine and profile paths. The
-original license is included here.
+project's command names, and device sign-in opens Microsoft's prefilled
+remote-connect URL. Managed-engine and legacy-data migration code is omitted
+because this project supplies fixed engine and profile paths. The original
+license is included here.

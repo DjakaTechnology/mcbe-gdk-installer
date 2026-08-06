@@ -9,6 +9,7 @@ import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from urllib.parse import urlencode
 
 from .config import (
     DATA,
@@ -146,8 +147,13 @@ class NativeAuth:
             if "device_code" not in d:
                 die("Microsoft device-code request failed: "
                     f"{d.get('error_description') or d.get('error') or d}")
-            url = d.get("verification_uri") or "https://www.microsoft.com/link"
             code = d.get("user_code")
+            if not code:
+                die("Microsoft device-code response omitted the sign-in code.")
+            url = d.get("verification_uri_complete") or (
+                "https://login.live.com/oauth20_remoteconnect.srf?"
+                + urlencode({"otc": code})
+            )
             if on_auth:
                 on_auth(url, code)
             info(f"Microsoft sign-in → {url} code {code}")

@@ -735,6 +735,20 @@ class NativeAuthCancellationTests(unittest.TestCase):
             "expires_in": 900,
         }
 
+    def test_device_code_callback_uses_prefilled_login_url(self):
+        native = auth.NativeAuth()
+        callback = mock.Mock(side_effect=lambda *_args: native.stop())
+
+        with mock.patch.object(
+                auth, "http_post_form", return_value=self._device_response()), \
+                mock.patch.object(auth, "info"):
+            native._flow(callback, None)
+
+        callback.assert_called_once_with(
+            "https://login.live.com/oauth20_remoteconnect.srf?otc=ABCD-EFGH",
+            "ABCD-EFGH",
+        )
+
     def test_logout_during_token_post_cannot_resurrect_account(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
