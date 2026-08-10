@@ -89,7 +89,53 @@ class RemovalTest(unittest.TestCase):
                 with runtime_lock(self.root):
                     self.fail("lock unexpectedly acquired")
 
-    def test_running_launcher_is_detected_and_stopped(self):
+    def _assert_launcher_detected_and_stopped(self, process):
+        try:
+            for _ in range(50):
+                if minecraft_launcher_pid(self.root) == process.pid:
+                    break
+                time.sleep(0.02)
+            self.assertEqual(minecraft_launcher_pid(self.root), process.pid)
+            self.assertTrue(stop_minecraft(self.root))
+            process.wait(timeout=2)
+            self.assertIsNone(minecraft_launcher_pid(self.root))
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+
+    def test_dispatcher_launched_script_is_detected_and_stopped(self):
+        installed_launcher = self.root / "lib" / "launch.sh"
+        installed_launcher.write_text(
+            """#!/bin/sh
+exec 9>"$1"
+flock -n 9 || exit 1
+printf '%s\n' "$$" > "$2"
+sleep 30
+"""
+        )
+        installed_launcher.chmod(0o755)
+        root_alias = Path(self.temp.name) / "installed-root"
+        root_alias.symlink_to(self.root, target_is_directory=True)
+        dispatcher = Path(self.temp.name) / "mcbe-gdk-linux"
+        dispatcher.write_text(
+            """#!/bin/sh
+root="$1"
+exec "$root/lib/launch.sh" \
+  "$root/profile/.desktop-launch.lock" \
+  "$root/profile/.desktop-launch.pid"
+"""
+        )
+        dispatcher.chmod(0o755)
+        self.profile.mkdir(parents=True, exist_ok=True)
+
+        process = subprocess.Popen(
+            [dispatcher, root_alias],
+            start_new_session=True,
+        )
+        self._assert_launcher_detected_and_stopped(process)
+
+    def test_legacy_named_launcher_is_detected_and_stopped(self):
         launcher = Path(self.temp.name) / "mcbe-gdk-linux"
         launcher.write_text(
             """#!/bin/sh
@@ -103,22 +149,12 @@ sleep 30
         lock = self.profile / LOCK_NAME
         pid_file = self.profile / ".desktop-launch.pid"
         lock.parent.mkdir(parents=True, exist_ok=True)
+
         process = subprocess.Popen(
             [launcher, lock, pid_file],
             start_new_session=True,
         )
-        try:
-            for _ in range(50):
-                if minecraft_launcher_pid(self.root) == process.pid:
-                    break
-                time.sleep(0.02)
-            self.assertEqual(minecraft_launcher_pid(self.root), process.pid)
-            self.assertTrue(stop_minecraft(self.root))
-            process.wait(timeout=2)
-            self.assertIsNone(minecraft_launcher_pid(self.root))
-        finally:
-            if process.poll() is None:
-                process.kill()
+        self._assert_launcher_detected_and_stopped(process)
 
 
 if __name__ == "__main__":

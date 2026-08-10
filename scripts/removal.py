@@ -31,8 +31,12 @@ def runtime_lock(root: Path):
 def _is_launcher(pid: int, lock_path: Path) -> bool:
     try:
         command = (Path("/proc") / str(pid) / "cmdline").read_bytes().split(b"\0")
+        installed_launcher = os.path.realpath(
+            os.fsencode(lock_path.parent.parent / "lib" / "launch.sh")
+        )
         if not any(
-            Path(part.decode()).name == "mcbe-gdk-linux"
+            os.path.basename(part) == b"mcbe-gdk-linux"
+            or os.path.realpath(part) == installed_launcher
             for part in command
             if part
         ):
