@@ -24,6 +24,39 @@ notify() {
   fi
 }
 
+ntsync_preflight() {
+  local status
+  local wineserver="$ENGINE/files/bin/wineserver"
+  local grep_status
+
+  if ! test -f "$wineserver" || ! test -r "$wineserver"; then
+    status='NTSync preflight: engine wineserver is missing or unreadable; update or reinstall the engine.'
+  else
+    grep -aFq -- '/dev/ntsync' "$wineserver" 2>/dev/null
+    grep_status=$?
+    if (( grep_status == 1 )); then
+      status='NTSync preflight: engine wineserver lacks /dev/ntsync support; update or reinstall the engine.'
+    elif (( grep_status != 0 )); then
+      status='NTSync preflight: could not inspect engine wineserver; update or reinstall the engine.'
+    elif ! test -e /dev/ntsync; then
+      status='NTSync preflight: /dev/ntsync is missing; use Linux 6.14+ or a distribution NTSync backport and load the module.'
+    elif ! test -c /dev/ntsync; then
+      status='NTSync preflight: /dev/ntsync is not a character device; repair the distribution device node.'
+    elif ! test -r /dev/ntsync; then
+      status='NTSync preflight: /dev/ntsync is unreadable; repair the distribution device permissions.'
+    else
+      status='NTSync preflight: static prerequisites present.'
+    fi
+  fi
+
+  printf '%s\n' "$status" >> "$LOG"
+  if [[ "$status" != 'NTSync preflight: static prerequisites present.' ]]; then
+    notify 'NTSync performance path unavailable' \
+      "Minecraft will still launch. See $LOG"
+  fi
+  return 0
+}
+
 [[ -f "$GAME" ]] || {
   notify 'MCBE GDK Installer' \
     'Minecraft.Windows.exe is missing; rerun install.sh.'
@@ -86,6 +119,9 @@ if [[ -f "$GPU_MARKER" ]]; then
   exit 3
 fi
 
+printf '\n[%(%F %T)T] Launch requested\n' -1 >> "$LOG"
+ntsync_preflight
+
 # Custom engines are intentionally outside BOL's managed-engine cache path.
 # Supply equivalent persistent caches explicitly and keep heavyweight Proton
 # diagnostics off during normal play.
@@ -142,7 +178,6 @@ while IFS= read -r -d '' options; do
     printf 'dev_assertions_show_dialog:0\n' >> "$options"
 done < <(find "$BOL_HOME/compatdata" -type f -name options.txt -print0 2>/dev/null || true)
 
-printf '\n[%(%F %T)T] Launch requested\n' -1 >> "$LOG"
 start=$SECONDS
 
 gpu_output="$(python3 "$RUNTIME" gpu-arm 2>> "$LOG")"
