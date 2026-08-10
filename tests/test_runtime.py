@@ -16,6 +16,7 @@ class RuntimeSmokeTest(unittest.TestCase):
         "PROTON_NO_NTSYNC",
         "PROTON_ADD_CONFIG",
         "STEAM_COMPAT_CONFIG",
+        "VKD3D_DISABLE_EXTENSIONS",
     )
 
     def _run_launch_case(
@@ -97,7 +98,12 @@ import json
 import os
 from pathlib import Path
 
-names = ("PROTON_NO_NTSYNC", "PROTON_ADD_CONFIG", "STEAM_COMPAT_CONFIG")
+names = (
+    "PROTON_NO_NTSYNC",
+    "PROTON_ADD_CONFIG",
+    "STEAM_COMPAT_CONFIG",
+    "VKD3D_DISABLE_EXTENSIONS",
+)
 payload = {}
 for name in names:
     key = os.fsencode(name)
@@ -308,6 +314,25 @@ with patch.object(runtime, "login", side_effect=KeyboardInterrupt):
         self.assertNotIn("GNUTLS_SYSTEM_PRIORITY_FILE", launch)
         self.assertNotIn("gnutls-no-tls13", launch)
 
+    def test_launcher_disables_present_wait_extensions(self):
+        present_wait = "VK_KHR_present_wait,VK_KHR_present_wait2"
+        cases = (
+            ("default", {}, present_wait),
+            (
+                "merge",
+                {"VKD3D_DISABLE_EXTENSIONS": "VK_EXT_foo;VK_KHR_present_wait"},
+                "VK_EXT_foo;VK_KHR_present_wait,VK_KHR_present_wait2",
+            ),
+        )
+        for name, inherited, expected in cases:
+            with self.subTest(name=name):
+                case = self._run_launch_case(inherited=inherited)
+                self.assertEqual(case["result"].returncode, 0, case["result"].stderr)
+                self.assertEqual(
+                    bytes.fromhex(case["child_env"]["VKD3D_DISABLE_EXTENSIONS"]).decode(),
+                    expected,
+                )
+
     def test_launcher_ntsync_legacy_proton_flags_do_not_change_status(self):
         expected = "NTSync preflight: static prerequisites present."
         cases = (
@@ -336,8 +361,13 @@ with patch.object(runtime, "login", side_effect=KeyboardInterrupt):
                     case["child_env"],
                     {
                         key: (
-                            None if key not in inherited
-                            else os.fsencode(inherited[key]).hex()
+                            os.fsencode(
+                                "VK_KHR_present_wait,VK_KHR_present_wait2"
+                                if key == "VKD3D_DISABLE_EXTENSIONS"
+                                else inherited[key]
+                            ).hex()
+                            if key == "VKD3D_DISABLE_EXTENSIONS" or key in inherited
+                            else None
                         )
                         for key in self._PROTON_VARS
                     },
@@ -471,6 +501,11 @@ with patch.object(runtime, "login", side_effect=KeyboardInterrupt):
                     case["fixture_state"]["before"],
                     case["fixture_state"]["after"],
                 )
+                expected_env = {
+                    "VKD3D_DISABLE_EXTENSIONS":
+                        "VK_KHR_present_wait,VK_KHR_present_wait2",
+                    **expected_env,
+                }
                 expected_child = {
                     key: (
                         None if key not in expected_env
