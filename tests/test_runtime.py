@@ -314,22 +314,22 @@ with patch.object(runtime, "login", side_effect=KeyboardInterrupt):
         self.assertNotIn("GNUTLS_SYSTEM_PRIORITY_FILE", launch)
         self.assertNotIn("gnutls-no-tls13", launch)
 
-    def test_launcher_disables_present_wait_extensions(self):
-        present_wait = "VK_KHR_present_wait,VK_KHR_present_wait2"
+    def test_launcher_preserves_vkd3d_extension_policy(self):
         cases = (
-            ("default", {}, present_wait),
+            ("absent", {}, None),
             (
-                "merge",
+                "inherited",
                 {"VKD3D_DISABLE_EXTENSIONS": "VK_EXT_foo;VK_KHR_present_wait"},
-                "VK_EXT_foo;VK_KHR_present_wait,VK_KHR_present_wait2",
+                "VK_EXT_foo;VK_KHR_present_wait",
             ),
         )
         for name, inherited, expected in cases:
             with self.subTest(name=name):
                 case = self._run_launch_case(inherited=inherited)
                 self.assertEqual(case["result"].returncode, 0, case["result"].stderr)
+                actual = case["child_env"]["VKD3D_DISABLE_EXTENSIONS"]
                 self.assertEqual(
-                    bytes.fromhex(case["child_env"]["VKD3D_DISABLE_EXTENSIONS"]).decode(),
+                    None if actual is None else bytes.fromhex(actual).decode(),
                     expected,
                 )
 
@@ -361,12 +361,8 @@ with patch.object(runtime, "login", side_effect=KeyboardInterrupt):
                     case["child_env"],
                     {
                         key: (
-                            os.fsencode(
-                                "VK_KHR_present_wait,VK_KHR_present_wait2"
-                                if key == "VKD3D_DISABLE_EXTENSIONS"
-                                else inherited[key]
-                            ).hex()
-                            if key == "VKD3D_DISABLE_EXTENSIONS" or key in inherited
+                            os.fsencode(inherited[key]).hex()
+                            if key in inherited
                             else None
                         )
                         for key in self._PROTON_VARS
@@ -501,11 +497,6 @@ with patch.object(runtime, "login", side_effect=KeyboardInterrupt):
                     case["fixture_state"]["before"],
                     case["fixture_state"]["after"],
                 )
-                expected_env = {
-                    "VKD3D_DISABLE_EXTENSIONS":
-                        "VK_KHR_present_wait,VK_KHR_present_wait2",
-                    **expected_env,
-                }
                 expected_child = {
                     key: (
                         None if key not in expected_env

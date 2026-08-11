@@ -161,15 +161,6 @@ vkd3d_config="${VKD3D_CONFIG:-}"
 if [[ ",${vkd3d_config//;/,}," != *,force_raw_va_cbv,* ]]; then
   export VKD3D_CONFIG="${vkd3d_config:+$vkd3d_config,}force_raw_va_cbv"
 fi
-# NVIDIA can stop retiring present IDs while an XWayland surface is hidden.
-# Use vkd3d-proton's GPU-completion fallback instead of its unbounded present wait.
-vkd3d_disable_extensions="${VKD3D_DISABLE_EXTENSIONS:-}"
-for extension in VK_KHR_present_wait VK_KHR_present_wait2; do
-  if [[ ",${vkd3d_disable_extensions//;/,}," != *,"$extension",* ]]; then
-    vkd3d_disable_extensions="${vkd3d_disable_extensions:+$vkd3d_disable_extensions,}$extension"
-  fi
-done
-export VKD3D_DISABLE_EXTENSIONS="$vkd3d_disable_extensions"
 export WINEDLLOVERRIDES="cryptbase=n,b;vrclient=;vrclient_x64=;openvr_api=;wineopenxr=;amd_ags_x64=${WINEDLLOVERRIDES:+;$WINEDLLOVERRIDES}"
 [[ -n "${WAYLAND_DISPLAY:-}" ]] && export WINE_DISABLE_VULKAN_OPWR=1
 
