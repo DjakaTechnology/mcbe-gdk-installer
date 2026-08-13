@@ -13,3 +13,10 @@ project's command names, and device sign-in opens Microsoft's prefilled
 remote-connect URL. Managed-engine and legacy-data migration code is omitted
 because this project supplies fixed engine and profile paths. The original
 license is included here.
+
+`auth/gpu_safety.py` imports BedrockOnLinux v2.1.4's Gamescope root-window
+recognition (commit `c03b81f0ddcb1e63bdc826659fefa1a189859e1d`): when a
+sandboxed session (Steam Deck Game Mode / Flatpak) drops the `GAMESCOPE_*`
+environment, the compositor is still identified by its `GAMESCOPE_*` properties
+on the X root window, so a legitimately zero-provider X11 session is not
+mistaken for a software renderer.
