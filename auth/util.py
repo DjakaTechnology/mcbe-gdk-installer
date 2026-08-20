@@ -133,7 +133,7 @@ def http_post_form(url, fields):
         try:
             return json.loads(e.read().decode())
         except Exception:
-            raise
+            raise e
 
 
 # Retry and resume large downloads after transient network failures.

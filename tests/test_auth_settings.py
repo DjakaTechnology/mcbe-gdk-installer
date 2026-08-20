@@ -1,15 +1,17 @@
 """Regression tests for the managed WineGDK online-access setting."""
 # SPDX-License-Identifier: MIT
 
+import io
 import json
 import os
 import stat
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest import mock
 
-from auth import auth, prefix
+from auth import auth, prefix, wine_registry
 
 
 _UPGRADED_SYSTEM_REG = b"""WINE REGISTRY Version 2
@@ -34,6 +36,21 @@ _UPGRADED_USER_REG = b"""WINE REGISTRY Version 2
 
 
 class WineGdkPrerequisiteTests(unittest.TestCase):
+    def test_registry_staging_scavenger_removes_secret_residue(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            prefix_dir = Path(temporary)
+            live = prefix_dir / "system.reg"
+            live.write_text("live registry", encoding="utf-8")
+            stale_system = prefix_dir / ".system.reg.bol-crash"
+            stale_user = prefix_dir / ".user.reg.bol-crash"
+            stale_system.write_text("RefreshToken=secret", encoding="utf-8")
+            stale_user.write_text("user secret", encoding="utf-8")
+
+            self.assertTrue(wine_registry.purge_registry_staging(prefix_dir))
+            self.assertFalse(stale_system.exists())
+            self.assertFalse(stale_user.exists())
+            self.assertEqual(live.read_text(encoding="utf-8"), "live registry")
+            self.assertFalse(wine_registry.purge_registry_staging(prefix_dir))
     def test_bundled_engine_seeds_cryptbase_before_wineboot(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -469,6 +486,133 @@ class OnlinePreauthPayloadTests(unittest.TestCase):
                 self.assertFalse(auth.xbl_preauth(""))
             self.assertEqual(path.read_bytes(), before)
 
+    def test_complete_unexpired_cache_skips_the_network_chain(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cache = root / "winegdk-preauth"
+            cache.mkdir()
+            epoch = "7" * 32
+            (cache / ".account-epoch").write_text(epoch + "\n")
+            payload = self.payload()
+            payload["_account_epoch"] = epoch
+            payload = auth._with_winegdk_expiry_epochs(payload)
+            path = cache / "device.json"
+            path.write_text(json.dumps(payload))
+            before = path.read_bytes()
+
+            with mock.patch.object(auth, "DATA", root), \
+                    mock.patch("urllib.request.urlopen") as urlopen, \
+                    mock.patch.object(auth, "warn"), \
+                    mock.patch.object(auth, "info"):
+                self.assertTrue(auth.xbl_preauth(
+                    "fresh-access-token", epoch))
+            urlopen.assert_not_called()
+            self.assertEqual(path.read_bytes(), before)
+
+    def test_legacy_cache_is_upgraded_on_reuse_without_network(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cache = root / "winegdk-preauth"
+            cache.mkdir()
+            epoch = "8" * 32
+            (cache / ".account-epoch").write_text(epoch + "\n")
+            payload = self.payload()
+            payload["_account_epoch"] = epoch
+            path = cache / "device.json"
+            path.write_text(json.dumps(payload))
+            self.assertNotIn("mp_expiry_epoch", json.loads(path.read_text()))
+
+            with mock.patch.object(auth, "DATA", root), \
+                    mock.patch("urllib.request.urlopen") as urlopen, \
+                    mock.patch.object(auth, "warn"), \
+                    mock.patch.object(auth, "info"):
+                self.assertTrue(auth.xbl_preauth(
+                    "fresh-access-token", epoch))
+            urlopen.assert_not_called()
+            stored = json.loads(path.read_text())
+            for epoch_field in auth._WINEGDK_EXPIRY_EPOCH_FIELDS.values():
+                self.assertRegex(stored[epoch_field], r"^[0-9]+$")
+
+    def test_partial_cache_with_access_token_cannot_skip_the_refresh_chain(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cache = root / "winegdk-preauth"
+            cache.mkdir()
+            epoch = "6" * 32
+            (cache / ".account-epoch").write_text(epoch + "\n")
+            partial = self.payload()
+            partial["_account_epoch"] = epoch
+            partial["mp_token"] = None
+            path = cache / "device.json"
+            path.write_text(json.dumps(partial))
+            before = path.read_bytes()
+
+            with mock.patch.object(auth, "DATA", root), \
+                    mock.patch("urllib.request.urlopen",
+                               side_effect=OSError("simulated timeout")) \
+                    as urlopen, \
+                    mock.patch.object(auth, "warn"), \
+                    mock.patch.object(auth, "info"):
+                self.assertFalse(auth.xbl_preauth(
+                    "fresh-access-token", epoch))
+            urlopen.assert_called()
+            self.assertEqual(path.read_bytes(), before)
+
+    def test_malformed_cache_cannot_skip_the_refresh_chain(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cache = root / "winegdk-preauth"
+            cache.mkdir()
+            epoch = "5" * 32
+            (cache / ".account-epoch").write_text(epoch + "\n")
+            path = cache / "device.json"
+            path.write_text("not-json{{")
+            before = path.read_bytes()
+
+            with mock.patch.object(auth, "DATA", root), \
+                    mock.patch("urllib.request.urlopen",
+                               side_effect=OSError("simulated timeout")) \
+                    as urlopen, \
+                    mock.patch.object(auth, "warn"), \
+                    mock.patch.object(auth, "info"):
+                self.assertFalse(auth.xbl_preauth(
+                    "fresh-access-token", epoch))
+            urlopen.assert_called()
+            self.assertEqual(path.read_bytes(), before)
+
+    def test_logout_revokes_cache_even_with_fresh_access_token(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            msa = root / "msa"
+            cache = root / "winegdk-preauth"
+            msa.mkdir()
+            cache.mkdir()
+            (msa / "token.json").write_text(
+                json.dumps({"refresh_token": "old-account"}))
+            old_epoch = "a" * 32
+            (cache / ".account-epoch").write_text(old_epoch + "\n")
+            payload = self.payload()
+            payload["_account_epoch"] = old_epoch
+            auth._store_online_preauth(
+                cache / "device.json", payload, expected_epoch=old_epoch)
+
+            with mock.patch.object(auth, "DATA", root), \
+                    mock.patch.object(auth, "MSA_DIR", msa), \
+                    mock.patch("urllib.request.urlopen",
+                               side_effect=OSError("simulated timeout")) \
+                    as urlopen, \
+                    mock.patch.object(auth, "warn"), \
+                    mock.patch.object(auth, "info"):
+                self.assertTrue(auth.msa_logout())
+                self.assertNotEqual(
+                    (cache / ".account-epoch").read_text().strip(), old_epoch)
+                # A crash could leave the old account's online payload
+                # behind; the rotated generation must prevent its reuse even
+                # when a fresh access token is supplied.
+                (cache / "device.json").write_text(json.dumps(payload))
+                self.assertFalse(auth.xbl_preauth("fresh-access-token"))
+            urlopen.assert_called()
+
     def test_launch_epoch_mismatch_refuses_even_valid_cached_tokens(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -501,6 +645,7 @@ class OnlinePreauthPayloadTests(unittest.TestCase):
             (cache / "device-key.pem").write_bytes(key)
             (cache / "device-id.txt").write_text(device_id)
             (cache / ".device-crash.tmp").write_text("old account tokens")
+            (msa / ".token-crash.tmp").write_text("old refresh token")
 
             with mock.patch.object(auth, "DATA", root), \
                     mock.patch.object(auth, "MSA_DIR", msa):
@@ -509,6 +654,7 @@ class OnlinePreauthPayloadTests(unittest.TestCase):
             self.assertFalse((msa / "token.json").exists())
             self.assertFalse((cache / "device.json").exists())
             self.assertFalse((cache / ".device-crash.tmp").exists())
+            self.assertEqual(list(msa.glob(".token-*.tmp")), [])
             self.assertEqual((cache / "device-key.pem").read_bytes(), key)
             self.assertEqual((cache / "device-id.txt").read_text(), device_id)
             self.assertRegex((cache / ".account-epoch").read_text().strip(),
@@ -522,30 +668,118 @@ class OnlinePreauthPayloadTests(unittest.TestCase):
                     mock.patch.object(auth, "info"):
                 self.assertFalse(auth.xbl_preauth(""))
 
-    def test_fallback_rechecks_cache_expiry_after_failed_post(self):
+    def test_session_snapshot_scavenges_crash_left_msa_stage(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            msa = root / "msa"
+            cache = root / "winegdk-preauth"
+            msa.mkdir()
+            cache.mkdir()
+            token = {"refresh_token": "live"}
+            (msa / "token.json").write_text(json.dumps(token), encoding="utf-8")
+            stale = msa / ".token-crash.tmp"
+            stale.write_text("old refresh token", encoding="utf-8")
+            epoch = "a" * 32
+            (cache / ".account-epoch").write_text(epoch + "\n", encoding="utf-8")
+
+            with mock.patch.object(auth, "DATA", root), \
+                    mock.patch.object(auth, "MSA_DIR", msa):
+                self.assertEqual(auth.msa_session_snapshot(), (token, epoch))
+            self.assertFalse(stale.exists())
+
+    def test_msa_refresh_distinguishes_revocation_from_outage(self):
+        rejected = (
+            {"error": "invalid_grant"},
+            {"error": "invalid_grant", "refresh_token": "must-not-win"},
+            {"refresh_token": "incomplete"},
+            [],
+        )
+        for response in rejected:
+            with self.subTest(response=response), mock.patch.object(
+                auth, "http_post_form", return_value=response
+            ):
+                with self.assertRaises(auth.MsaRefreshRejected):
+                    auth.msa_refresh("revoked")
+        with mock.patch.object(
+            auth,
+            "http_post_form",
+            return_value={"error": "temporarily_unavailable"},
+        ):
+            self.assertIsNone(auth.msa_refresh("offline"))
+        with mock.patch.object(
+            auth,
+            "http_post_form",
+            return_value={"access_token": "access", "refresh_token": "refresh"},
+        ):
+            self.assertEqual(
+                auth.msa_refresh("old")["refresh_token"],
+                "refresh",
+            )
+        for status in (400, 429):
+            failure = urllib.error.HTTPError(
+                "https://login.live.com/oauth20_token.srf",
+                status,
+                "failure",
+                {},
+                io.BytesIO(b"not-json"),
+            )
+            with self.subTest(status=status), mock.patch(
+                "urllib.request.urlopen", side_effect=failure
+            ):
+                expected = (
+                    urllib.error.HTTPError
+                    if status == 429
+                    else auth.MsaRefreshRejected
+                )
+                with self.assertRaises(expected):
+                    auth.msa_refresh("old")
+            failure.close()
+
+        class RawResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def read(self):
+                return b"not-json"
+
+        with mock.patch("urllib.request.urlopen", return_value=RawResponse()):
+            with self.assertRaises(auth.MsaRefreshRejected):
+                auth.msa_refresh("old")
+
+    def test_near_expiry_cache_cannot_skip_the_refresh_chain(self):
         from datetime import datetime, timezone
 
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             cache = root / "winegdk-preauth"
             cache.mkdir()
-            expiry_text = "2030-01-01T00:00:00.1234567Z"
-            expiry = datetime(2030, 1, 1, tzinfo=timezone.utc).timestamp()
-            auth._store_online_preauth(
-                cache / "device.json", self.payload(expiry_text))
+            epoch = "9" * 32
+            (cache / ".account-epoch").write_text(epoch + "\n")
+            now = datetime(2030, 1, 1, tzinfo=timezone.utc).timestamp()
+            expiry = datetime.fromtimestamp(
+                now + 30, tz=timezone.utc).isoformat()
+            payload = self.payload(expiry)
+            payload["_account_epoch"] = epoch
+            path = cache / "device.json"
+            path.write_text(json.dumps(payload))
+            before = path.read_bytes()
 
-            # First validation: two minutes remain. The device POST then fails
-            # after the cache has crossed its 60-second safety margin. A stale
-            # boolean from function entry would incorrectly return True here.
+            # Only 30 seconds remain — inside the 60-second safety margin, so
+            # the cached state must NOT be reused and the refresh chain runs.
             with mock.patch.object(auth, "DATA", root), \
-                    mock.patch.object(
-                        auth.time, "time",
-                        side_effect=[expiry - 120, expiry - 30, expiry]), \
+                    mock.patch.object(auth.time, "time", return_value=now), \
                     mock.patch("urllib.request.urlopen",
-                               side_effect=OSError("simulated timeout")), \
+                               side_effect=OSError("simulated timeout")) \
+                    as urlopen, \
                     mock.patch.object(auth, "warn"), \
                     mock.patch.object(auth, "info"):
-                self.assertFalse(auth.xbl_preauth("fresh-access-token"))
+                self.assertFalse(auth.xbl_preauth(
+                    "fresh-access-token", epoch))
+            urlopen.assert_called()
+            self.assertEqual(path.read_bytes(), before)
 
     def test_achievements_use_user_only_xsts_and_services_keep_sisu(self):
         expiry = "2999-01-01T00:00:00.1234567Z"

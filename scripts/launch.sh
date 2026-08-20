@@ -121,6 +121,11 @@ fi
 
 printf '\n[%(%F %T)T] Launch requested\n' -1 >> "$LOG"
 ntsync_preflight
+performance_output="$(python3 "$RUNTIME" performance 2>> "$LOG" || true)"
+if [[ -n "$performance_output" ]]; then
+  printf '%s\n' "$performance_output" >> "$LOG"
+  notify 'Performance settings may slow Minecraft' "See $LOG"
+fi
 
 # Custom engines are intentionally outside BOL's managed-engine cache path.
 # Supply equivalent persistent caches explicitly and keep heavyweight Proton
@@ -158,9 +163,14 @@ export MICROSOFT_WINDOWSAPPRUNTIME_BOOTSTRAP_INITIALIZE_FAILFAST=0
 export MICROSOFT_WINDOWSAPPRUNTIME_DEPLOYMENT_INITIALIZE_ONERRORSHOWUI=0
 export WINEGDK_PREAUTH_DEVICE="Z:${BOL_HOME//\//\\}\\winegdk-preauth\\device.json"
 vkd3d_config="${VKD3D_CONFIG:-}"
-if [[ ",${vkd3d_config//;/,}," != *,force_raw_va_cbv,* ]]; then
-  export VKD3D_CONFIG="${vkd3d_config:+$vkd3d_config,}force_raw_va_cbv"
+if [[ "${MCBE_GDK_DISABLE_DXR:-0}" == "1" &&
+      ",${vkd3d_config//;/,}," != *,nodxr,* ]]; then
+  vkd3d_config="${vkd3d_config:+$vkd3d_config,}nodxr"
 fi
+if [[ ",${vkd3d_config//;/,}," != *,force_raw_va_cbv,* ]]; then
+  vkd3d_config="${vkd3d_config:+$vkd3d_config,}force_raw_va_cbv"
+fi
+export VKD3D_CONFIG="$vkd3d_config"
 export WINEDLLOVERRIDES="cryptbase=n,b;vrclient=;vrclient_x64=;openvr_api=;wineopenxr=;amd_ags_x64=${WINEDLLOVERRIDES:+;$WINEDLLOVERRIDES}"
 [[ -n "${WAYLAND_DISPLAY:-}" ]] && export WINE_DISABLE_VULKAN_OPWR=1
 

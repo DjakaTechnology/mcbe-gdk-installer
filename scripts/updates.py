@@ -25,6 +25,7 @@ VERSION_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 ENGINE_SELECTION_FILE = "engine-release"
 API_VERSION = "2022-11-28"
 MAX_RELEASE_JSON = 1_000_000
+MAX_RELEASE_LIST_JSON = 10_000_000
 ProgressCallback = Callable[[str, int | None, int | None], None]
 
 
@@ -130,6 +131,38 @@ def fetch_release(
         raise UpdateError("GitHub returned invalid release metadata.") from exc
 
 
+def fetch_release_tags(repo: str, *, timeout: int = 10) -> list[str]:
+    request = Request(
+        f"https://api.github.com/repos/{repo}/releases?per_page=100",
+        headers={
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": API_VERSION,
+            "User-Agent": "mcbe-gdk-installer",
+        },
+    )
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            raw = response.read(MAX_RELEASE_LIST_JSON + 1)
+    except OSError as exc:
+        raise UpdateError(f"Could not check {repo} releases: {exc}") from exc
+    if len(raw) > MAX_RELEASE_LIST_JSON:
+        raise UpdateError("GitHub returned an unexpectedly large release response.")
+    try:
+        data = json.loads(raw)
+        tags = [str(item["tag_name"]) for item in data]
+    except (TypeError, KeyError, ValueError) as exc:
+        raise UpdateError("GitHub returned invalid release metadata.") from exc
+    releases = []
+    for tag in tags:
+        try:
+            version_tuple(tag)
+        except UpdateError:
+            continue
+        releases.append(tag)
+    releases.sort(key=version_tuple, reverse=True)
+    return releases
+
+
 def fetch_latest_release(repo: str, *, timeout: int = 10) -> Release:
     return fetch_release(repo, timeout=timeout)
 
@@ -153,6 +186,19 @@ def read_engine_version(root: Path) -> str | None:
         return value
     except (OSError, KeyError, TypeError, ValueError, UpdateError):
         return "v0.0.0"
+
+
+def engine_is_ready(root: Path, expected_version: str) -> bool:
+    engine = root / "engine/GDK-Proton-mcbe-gdk"
+    proton = engine / "proton"
+    wineserver = engine / "files/bin/wineserver"
+    return (
+        read_engine_version(root) == expected_version
+        and proton.is_file()
+        and os.access(proton, os.X_OK)
+        and wineserver.is_file()
+        and os.access(wineserver, os.X_OK)
+    )
 
 
 def read_engine_selection(root: Path) -> str:
@@ -376,10 +422,28 @@ def install_engine_update(
         if manifest.get("version") != release.tag:
             raise UpdateError("Engine manifest version does not match its release.")
         destination = engine_parent / "GDK-Proton-mcbe-gdk"
-        backup = _replace_directory(source, destination)
-        shutil.rmtree(backup)
+        if destination.exists():
+            backup = _replace_directory(source, destination)
+            shutil.rmtree(backup)
+        else:
+            source.rename(destination)
         if progress:
             progress("engine_done", None, None)
+
+
+def switch_engine(
+    root: Path,
+    selection: str,
+    progress: ProgressCallback | None = None,
+) -> Release:
+    """Install the selected engine release and persist the selection."""
+    selected = normalize_engine_selection(selection)
+    release = fetch_release(ENGINE_REPO, selected)
+    if not engine_is_ready(root, release.tag):
+        install_engine_update(release, root, progress)
+    root.mkdir(parents=True, exist_ok=True)
+    (root / ENGINE_SELECTION_FILE).write_text(selected + "\n", encoding="utf-8")
+    return release
 
 
 def install_available_updates(
@@ -460,13 +524,6 @@ def _engine_cli(root: Path, selection: str | None) -> int:
 
     selected = normalize_engine_selection(selection)
     print(f"Resolving compatibility engine {selected}…")
-    release = fetch_release(ENGINE_REPO, selected)
-    if current == release.tag:
-        root.mkdir(parents=True, exist_ok=True)
-        selection_file.write_text(selected + "\n", encoding="utf-8")
-        print(f"Compatibility engine {release.tag} is already installed.")
-        return 0
-
     seen: set[str] = set()
     labels = {
         "engine_download": "Downloading compatibility engine",
@@ -480,9 +537,11 @@ def _engine_cli(root: Path, selection: str | None) -> int:
             seen.add(stage)
             print(f"{labels.get(stage, 'Switching compatibility engine')}…")
 
-    install_engine_update(release, root, progress)
-    selection_file.write_text(selected + "\n", encoding="utf-8")
-    print(f"Switched compatibility engine to {release.tag}.")
+    release = switch_engine(root, selected, progress)
+    if current == release.tag:
+        print(f"Compatibility engine {release.tag} is already installed.")
+    else:
+        print(f"Switched compatibility engine to {release.tag}.")
     return 0
 
 

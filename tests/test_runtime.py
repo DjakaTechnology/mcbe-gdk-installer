@@ -27,6 +27,8 @@ class RuntimeSmokeTest(unittest.TestCase):
         wineserver_access="readable",
         grep_status=None,
         device_state="character-readable",
+        vkd3d_config=None,
+        disable_dxr=False,
     ):
         repo = Path(__file__).resolve().parents[1]
         real_test = shutil.which("test")
@@ -49,6 +51,7 @@ class RuntimeSmokeTest(unittest.TestCase):
             engine_trace = tmp / "engine-trace"
             notify_log = tmp / "notify.jsonl"
             child_env_path = tmp / "child-env.json"
+            vkd3d_config_path = tmp / "vkd3d-config"
 
             for directory in (
                 home,
@@ -112,6 +115,9 @@ Path(os.environ["NTSYNC_TEST_CHILD_ENV"]).write_text(
     json.dumps(payload), encoding="utf-8"
 )
 Path(os.environ["NTSYNC_TEST_UMU_TRACE"]).write_text("invoked\\n", encoding="utf-8")
+Path(os.environ["NTSYNC_TEST_VKD3D_CONFIG"]).write_text(
+    os.environ.get("VKD3D_CONFIG", ""), encoding="utf-8"
+)
 """,
             )
             write_executable(
@@ -194,6 +200,14 @@ exec "$NTSYNC_TEST_REAL_GREP" "$@"
             for name, value in (inherited or {}).items():
                 self.assertIn(name, self._PROTON_VARS)
                 env[name] = value
+            if vkd3d_config is None:
+                env.pop("VKD3D_CONFIG", None)
+            else:
+                env["VKD3D_CONFIG"] = vkd3d_config
+            if disable_dxr:
+                env["MCBE_GDK_DISABLE_DXR"] = "1"
+            else:
+                env.pop("MCBE_GDK_DISABLE_DXR", None)
             env.update({
                 "HOME": str(home),
                 "XDG_DATA_HOME": str(xdg),
@@ -209,6 +223,7 @@ exec "$NTSYNC_TEST_REAL_GREP" "$@"
                 "NTSYNC_TEST_ENGINE_TRACE": str(engine_trace),
                 "NTSYNC_TEST_NOTIFY_LOG": str(notify_log),
                 "NTSYNC_TEST_CHILD_ENV": str(child_env_path),
+                "NTSYNC_TEST_VKD3D_CONFIG": str(vkd3d_config_path),
             })
             if grep_status is None:
                 env.pop("NTSYNC_TEST_GREP_STATUS", None)
@@ -243,6 +258,11 @@ exec "$NTSYNC_TEST_REAL_GREP" "$@"
                 "log": log_path.read_text(encoding="utf-8") if log_path.exists() else "",
                 "notifications": notifications,
                 "child_env": child_env,
+                "vkd3d_config": (
+                    vkd3d_config_path.read_text(encoding="utf-8")
+                    if vkd3d_config_path.is_file()
+                    else None
+                ),
                 "runtime_trace": {
                     "commands": commands,
                     "umu": umu_trace.exists(),
@@ -314,6 +334,57 @@ with patch.object(runtime, "login", side_effect=KeyboardInterrupt):
         self.assertNotIn("GNUTLS_SYSTEM_PRIORITY_FILE", launch)
         self.assertNotIn("gnutls-no-tls13", launch)
 
+    def test_performance_advisories_cover_measured_bottlenecks(self):
+        repo = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            options = (
+                root
+                / "profile/compatdata/pfx/drive_c/users/steamuser/options.txt"
+            )
+            options.parent.mkdir(parents=True)
+            options.write_text(
+                "gfx_viewdistance:768\n"
+                "gfx_vsync:1\n"
+                "gfx_fullscreen:0\n",
+                encoding="utf-8",
+            )
+            meminfo = root / "meminfo"
+            meminfo.write_text("MemAvailable: 1048576 kB\n", encoding="utf-8")
+            code = """
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+from scripts import runtime
+
+with patch.object(
+    runtime.shutil, "disk_usage", return_value=SimpleNamespace(free=1024**3)
+):
+    warnings = runtime.performance_advisories(
+        Path(runtime.os.environ["MCBE_GDK_ROOT"]),
+        meminfo_path=Path(runtime.os.environ["TEST_MEMINFO"]),
+        environ={"WAYLAND_DISPLAY": "wayland-0"},
+    )
+assert len(warnings) == 4, warnings
+assert any("memory" in warning for warning in warnings)
+assert any("disk space" in warning for warning in warnings)
+assert any("48 chunks" in warning for warning in warnings)
+assert any("VSync" in warning for warning in warnings)
+"""
+            result = subprocess.run(
+                [sys.executable, "-c", code],
+                cwd=repo,
+                env={
+                    **os.environ,
+                    "MCBE_GDK_ROOT": str(root),
+                    "TEST_MEMINFO": str(meminfo),
+                },
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_launcher_preserves_vkd3d_extension_policy(self):
         cases = (
             ("absent", {}, None),
@@ -332,6 +403,20 @@ with patch.object(runtime, "login", side_effect=KeyboardInterrupt):
                     None if actual is None else bytes.fromhex(actual).decode(),
                     expected,
                 )
+
+    def test_launcher_can_disable_dxr_without_duplicate_flags(self):
+        cases = (
+            (None, "nodxr,force_raw_va_cbv"),
+            ("foo;nodxr", "foo;nodxr,force_raw_va_cbv"),
+        )
+        for inherited, expected in cases:
+            with self.subTest(inherited=inherited):
+                case = self._run_launch_case(
+                    vkd3d_config=inherited,
+                    disable_dxr=True,
+                )
+                self.assertEqual(case["result"].returncode, 0, case["result"].stderr)
+                self.assertEqual(case["vkd3d_config"], expected)
 
     def test_launcher_ntsync_legacy_proton_flags_do_not_change_status(self):
         expected = "NTSync preflight: static prerequisites present."
@@ -489,7 +574,7 @@ with patch.object(runtime, "login", side_effect=KeyboardInterrupt):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(
                     case["runtime_trace"]["commands"],
-                    ["prepare", "gpu-arm", "gpu-disarm"],
+                    ["performance", "prepare", "gpu-arm", "gpu-disarm"],
                 )
                 self.assertTrue(case["runtime_trace"]["umu"])
                 self.assertFalse(case["runtime_trace"]["engine"])
@@ -586,6 +671,108 @@ with ExitStack() as stack:
                 check=False,
             )
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_prepare_revokes_terminally_rejected_microsoft_session(self):
+        repo = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            game = root / "game"
+            game.mkdir()
+            (game / "Minecraft.Windows.exe").touch()
+            code = """
+from contextlib import ExitStack
+from pathlib import Path
+from unittest.mock import patch
+
+from scripts import runtime
+
+game = Path(runtime.os.environ["MCBE_GDK_ROOT"]) / "game"
+prefix = game.parent / "profile/compatdata/pfx"
+prefix.mkdir(parents=True)
+patches = {
+    "msa_signed_in": patch.object(runtime, "msa_signed_in", return_value=True),
+    "ensure_login_deps": patch.object(runtime, "ensure_login_deps", return_value=False),
+    "install_gdk_xbox_dlls": patch.object(runtime, "install_gdk_xbox_dlls"),
+    "fix_curl_ssl": patch.object(runtime, "fix_curl_ssl"),
+    "ensure_umu": patch.object(runtime, "ensure_umu"),
+    "boot_prefix": patch.object(runtime, "boot_prefix", return_value=True),
+    "active_prefix": patch.object(runtime, "active_prefix", return_value=prefix),
+    "purge_registry_staging": patch.object(runtime, "purge_registry_staging"),
+    "_install_cryptbase_in_prefix": patch.object(runtime, "_install_cryptbase_in_prefix"),
+    "install_gameinput": patch.object(runtime, "install_gameinput"),
+    "wine_apply_winegdk_prereqs": patch.object(runtime, "wine_apply_winegdk_prereqs"),
+    "msa_session_snapshot": patch.object(
+        runtime,
+        "msa_session_snapshot",
+        return_value=({"refresh_token": "revoked"}, "a" * 32),
+    ),
+    "msa_refresh": patch.object(
+        runtime,
+        "msa_refresh",
+        side_effect=runtime.MsaRefreshRejected("invalid_grant"),
+    ),
+    "msa_logout": patch.object(runtime, "msa_logout"),
+    "update_prefix_registry": patch.object(runtime, "update_prefix_registry"),
+    "wine_reg_set_refresh_token": patch.object(runtime, "wine_reg_set_refresh_token"),
+    "xbl_preauth": patch.object(runtime, "xbl_preauth"),
+    "bump_stack_reserve": patch.object(runtime, "bump_stack_reserve"),
+}
+with ExitStack() as stack:
+    mocks = {name: stack.enter_context(item) for name, item in patches.items()}
+    try:
+        runtime.prepare(game)
+    except runtime.BolError as exc:
+        assert "revoked" in str(exc)
+    else:
+        raise AssertionError("terminal refresh rejection was accepted")
+    mocks["msa_logout"].assert_called_once_with()
+    mocks["update_prefix_registry"].assert_called_once()
+    mocks["wine_reg_set_refresh_token"].assert_not_called()
+    mocks["xbl_preauth"].assert_not_called()
+    mocks["bump_stack_reserve"].assert_not_called()
+"""
+            result = subprocess.run(
+                [sys.executable, "-c", code],
+                cwd=repo,
+                env={**os.environ, "MCBE_GDK_ROOT": str(root)},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_source_runtime_keeps_source_modules_ahead_of_installed_lib(self):
+        repo = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            installed = root / "lib"
+            installed.mkdir()
+            (installed / "updates.py").write_text("SOURCE = 'installed'\n")
+            code = """
+import importlib.util
+import runtime
+
+print(importlib.util.find_spec("updates").origin)
+"""
+            result = subprocess.run(
+                [sys.executable, "-c", code],
+                cwd=repo,
+                env={
+                    **os.environ,
+                    "MCBE_GDK_ROOT": str(root),
+                    "PYTHONPATH": os.pathsep.join(
+                        (str(repo / "scripts"), str(repo))
+                    ),
+                },
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            Path(result.stdout.strip()).resolve(),
+            (repo / "scripts/updates.py").resolve(),
+        )
 
 
 if __name__ == "__main__":

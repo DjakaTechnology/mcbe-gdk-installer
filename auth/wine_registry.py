@@ -245,6 +245,26 @@ def _locked(prefix: Path):
         os.close(fd)
 
 
+def purge_registry_staging(prefix: Path) -> bool:
+    """Remove crash-left secret-bearing registry stage files."""
+    prefix = Path(prefix)
+    if not prefix.is_dir():
+        return False
+    removed = False
+    with _locked(prefix):
+        for name in ("system.reg", "user.reg"):
+            for stale in prefix.glob(f".{name}.bol-*"):
+                stale.unlink(missing_ok=True)
+                removed = True
+        if removed:
+            fd = os.open(prefix, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+    return removed
+
+
 def update_prefix_registry(
         prefix: Path,
         machine: Iterable[RegistryChange] = (),

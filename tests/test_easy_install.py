@@ -31,28 +31,36 @@ class NativePackageInstallTest(unittest.TestCase):
                 executable.write_text(f"#!/bin/sh\n{body}\n")
                 executable.chmod(0o755)
 
+            env = {
+                **os.environ,
+                "HOME": str(root),
+                "XDG_DATA_HOME": str(root / "share"),
+                "MCBE_GDK_ENGINE_RELEASE": "v0.1.2",
+                "PATH": f"{fake_bin}:{os.environ['PATH']}",
+            }
             subprocess.run(
                 [repo / "install.sh", content],
                 cwd=repo,
-                env={
-                    **os.environ,
-                    "HOME": str(root),
-                    "XDG_DATA_HOME": str(root / "share"),
-                    "MCBE_GDK_ENGINE_RELEASE": "v0.1.2",
-                    "PATH": f"{fake_bin}:{os.environ['PATH']}",
-                },
+                env=env,
                 check=True,
                 capture_output=True,
                 text=True,
             )
             self.assertEqual(bootstrap.read_bytes(), b"required")
             self.assertFalse(disabled.exists())
-            self.assertEqual(
-                (
-                    root / "share/mcbe-gdk-linux/engine-release"
-                ).read_text().strip(),
-                "v0.1.2",
+            selection_file = root / "share/mcbe-gdk-linux/engine-release"
+            self.assertEqual(selection_file.read_text().strip(), "v0.1.2")
+
+            env.pop("MCBE_GDK_ENGINE_RELEASE")
+            subprocess.run(
+                [repo / "install.sh", content],
+                cwd=repo,
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
             )
+            self.assertEqual(selection_file.read_text().strip(), "v0.1.2")
 
     def test_test_crypted_msixvc_is_extracted_and_installed(self):
         repo = Path(__file__).resolve().parents[1]

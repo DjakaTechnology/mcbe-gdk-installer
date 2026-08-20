@@ -140,7 +140,8 @@ installation.
 
 The latest engine release is selected by default. Use
 `mcbe-gdk-linux engine 0.1.5` to switch to `v0.1.5` without reinstalling the
-game. Versions may include or omit the `v`; use `latest` to resume tracking new
+game, or pick a release from the Compatibility engine selector in the setup
+UI. Versions may include or omit the `v`; use `latest` to resume tracking new
 engine releases. The selection persists across normal updates. For unattended
 initial installs, set `MCBE_GDK_ENGINE_RELEASE=vX.Y.Z`.
 

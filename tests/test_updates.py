@@ -28,8 +28,11 @@ from updates import (  # noqa: E402
     check_for_updates,
     fetch_latest_release,
     fetch_release,
+    fetch_release_tags,
     is_newer,
+    install_engine_update,
     normalize_engine_selection,
+    switch_engine,
 )
 
 
@@ -258,6 +261,93 @@ class UpdateTests(unittest.TestCase):
         self.assertIn("Verifying compatibility engine…", text)
         self.assertIn("MCBE GDK Installer updated…", text)
         self.assertIn("Updates installed.", text)
+
+    def test_release_tags_are_validated_and_sorted(self):
+        data = [
+            {"tag_name": "v0.1.9"},
+            {"tag_name": "v0.1.10"},
+            {"tag_name": "not-a-version"},
+            {"tag_name": "v0.2.0"},
+        ]
+        with patch(
+            "updates.urlopen", return_value=Response(json.dumps(data).encode())
+        ):
+            tags = fetch_release_tags(ENGINE_REPO)
+        self.assertEqual(tags, ["v0.2.0", "v0.1.10", "v0.1.9"])
+
+        with patch("updates.urlopen", return_value=Response(b"[{")):
+            with self.assertRaises(UpdateError):
+                fetch_release_tags(ENGINE_REPO)
+
+    def test_engine_install_bootstraps_missing_destination(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            selected = release(ENGINE_REPO, "v0.1.8")
+
+            def extract(command, check):
+                self.assertTrue(check)
+                work = Path(command[command.index("-C") + 1])
+                source = work / "GDK-Proton-mcbe-gdk"
+                source.mkdir()
+                (source / "engine-manifest.json").write_text(
+                    json.dumps({"version": selected.tag})
+                )
+
+            with patch(
+                "updates._download_verified", return_value=root / "engine.tar.gz"
+            ), patch("updates._validate_archive"), patch(
+                "updates.subprocess.run", side_effect=extract
+            ):
+                install_engine_update(selected, root)
+
+            manifest = (
+                root
+                / "engine/GDK-Proton-mcbe-gdk/engine-manifest.json"
+            )
+            self.assertEqual(json.loads(manifest.read_text())["version"], selected.tag)
+
+    def test_switch_engine_installs_and_persists_selection(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            engine = root / "engine/GDK-Proton-mcbe-gdk"
+            engine.mkdir(parents=True)
+            (engine / "engine-manifest.json").write_text(
+                json.dumps({"version": "v0.1.7"})
+            )
+            selected = release(ENGINE_REPO, "v0.1.5")
+            with patch("updates.fetch_release", return_value=selected) as fetch, patch(
+                "updates.install_engine_update"
+            ) as install:
+                result = switch_engine(root, "0.1.5")
+            self.assertEqual(result.tag, "v0.1.5")
+            self.assertEqual((root / "engine-release").read_text(), "v0.1.5\n")
+            fetch.assert_called_once_with(ENGINE_REPO, "v0.1.5")
+            install.assert_called_once_with(selected, root, None)
+
+            # Persisting the already-installed version never reinstalls.
+            (engine / "engine-manifest.json").write_text(
+                json.dumps({"version": "v0.1.5"})
+            )
+            proton = engine / "proton"
+            proton.write_text("#!/bin/sh\n")
+            proton.chmod(0o755)
+            wineserver = engine / "files/bin/wineserver"
+            wineserver.parent.mkdir(parents=True)
+            wineserver.write_text("runtime\n")
+            wineserver.chmod(0o755)
+            with patch("updates.fetch_release", return_value=selected), patch(
+                "updates.install_engine_update"
+            ) as install:
+                switch_engine(root, "v0.1.5")
+            install.assert_not_called()
+
+            # A matching manifest cannot hide a damaged engine installation.
+            wineserver.unlink()
+            with patch("updates.fetch_release", return_value=selected), patch(
+                "updates.install_engine_update"
+            ) as install:
+                switch_engine(root, "v0.1.5")
+            install.assert_called_once_with(selected, root, None)
 
 
 if __name__ == "__main__":

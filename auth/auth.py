@@ -8,6 +8,7 @@ import tempfile
 import threading
 import time
 from contextlib import contextmanager
+from urllib.error import HTTPError
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -23,12 +24,18 @@ from .config import (
 from .log import BolError, die, err, info, ok, warn
 from .prefix import active_prefix
 from .util import http_post_form, load_settings, save_settings
+
+
 from .wine_registry import (
     reg_delete,
     reg_dword,
     reg_sz,
     update_prefix_registry,
 )
+
+
+class MsaRefreshRejected(BolError):
+    """The OAuth server definitively rejected the persisted refresh token."""
 
 def msa_load():
     f = MSA_DIR / "token.json"
@@ -59,6 +66,21 @@ def msa_save(tok):
         except OSError:
             pass
         raise
+
+
+def _purge_msa_staging():
+    if not MSA_DIR.is_dir():
+        return
+    removed = False
+    for stale in MSA_DIR.glob(".token-*.tmp"):
+        stale.unlink(missing_ok=True)
+        removed = True
+    if removed:
+        fd = os.open(MSA_DIR, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
 
 
 def msa_signed_in():
@@ -102,12 +124,34 @@ def msa_logout():
 
 
 def msa_refresh(refresh_token):
-    """Trade a refresh token for a fresh one (same shape WineGDK's XUser uses
-    internally). Returns the token dict, or None if it was rejected."""
-    t = http_post_form(MSA_TOKEN, {
-        "client_id": MSA_CLIENT_ID, "scope": MSA_SCOPE,
-        "grant_type": "refresh_token", "refresh_token": refresh_token})
-    return t if t.get("refresh_token") else None
+    """Trade a refresh token for fresh Microsoft credentials.
+
+    Transient service failures permit the existing Xbox cache fallback.
+    Structured terminal rejections revoke the local account instead.
+    """
+    try:
+        token = http_post_form(MSA_TOKEN, {
+            "client_id": MSA_CLIENT_ID, "scope": MSA_SCOPE,
+            "grant_type": "refresh_token", "refresh_token": refresh_token})
+    except HTTPError as exc:
+        if exc.code in {408, 425, 429} or 500 <= exc.code < 600:
+            raise
+        raise MsaRefreshRejected("Microsoft rejected the saved session.") from exc
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise MsaRefreshRejected("Microsoft returned an invalid session response.") from exc
+    if not isinstance(token, dict):
+        raise MsaRefreshRejected("Microsoft returned an invalid session response.")
+    error = token.get("error")
+    if error in {"server_error", "temporarily_unavailable"}:
+        return None
+    if error:
+        raise MsaRefreshRejected("Microsoft rejected the saved session.")
+    if all(
+        isinstance(token.get(field), str) and token[field]
+        for field in ("access_token", "refresh_token")
+    ):
+        return token
+    raise MsaRefreshRejected("Microsoft returned incomplete session credentials.")
 
 
 class NativeAuth:
@@ -668,6 +712,7 @@ def msa_save_for_account_epoch(token, expected_epoch):
         return False
     cache = DATA / "winegdk-preauth"
     with _account_cache_lock(cache):
+        _purge_msa_staging()
         if _account_cache_epoch(cache) != expected_epoch:
             return False
         msa_save(token)
@@ -679,6 +724,7 @@ def msa_session_snapshot():
 
     cache = DATA / "winegdk-preauth"
     with _account_cache_lock(cache):
+        _purge_msa_staging()
         return msa_load(), _account_cache_epoch(cache)
 
 
@@ -726,6 +772,7 @@ def _purge_account_preauth(msa_token_path=None):
         # account tokens. It is never loaded, but remove it on logout as well.
         for stale in cache.glob(".device-*.tmp"):
             stale.unlink(missing_ok=True)
+        _purge_msa_staging()
         if msa_token_path is not None:
             Path(msa_token_path).unlink(missing_ok=True)
         try:
@@ -778,8 +825,10 @@ def xbl_preauth(msa_access_token, expected_account_epoch=None):
     through Wine's GnuTLS (fingerprinted as non-Schannel) — the same requests
     from the host succeed. Returns True only when a complete, unexpired online
     payload (including the multiplayer and Realms XSTS tokens) is available.
-    A failed refresh never overwrites a previously valid payload with
-    device-only data.
+    A complete, unexpired cached payload is reused as-is and skips the whole
+    network chain; only incomplete, near-expiry or account-mismatched state
+    triggers the full refresh. A failed refresh never overwrites a previously
+    valid payload with device-only data.
     """
     import base64, uuid as _uuid
     _clear_xbl_preauth_diagnostic()
@@ -807,6 +856,27 @@ def xbl_preauth(msa_access_token, expected_account_epoch=None):
     cached = _load_online_preauth(out_path)
     cached_ready = (_cached_account_matches(cached, account_epoch)
                     and not _online_preauth_problems(cached))
+    if cached_ready:
+        # A complete, unexpired online payload is the fast path: reuse it and
+        # skip the whole network chain. Only a legacy cache lacking WineGDK's
+        # derived epoch fields is rewritten, under the same account lock that
+        # a concurrent logout rotates.
+        upgraded = _with_winegdk_expiry_epochs(cached)
+        if upgraded != cached:
+            if not _store_online_preauth(
+                    out_path, upgraded, expected_epoch=account_epoch):
+                warn("Xbox Live pre-auth: account changed while upgrading "
+                     "the cached WineGDK credentials; refusing the old "
+                     "online payload.")
+                return False
+            cached.clear()
+            cached.update(upgraded)
+            info("Xbox Live pre-auth: upgraded cached token expirations "
+                 "for WineGDK.")
+        info("Xbox Live pre-auth: reusing the complete unexpired cached "
+             "online tokens.")
+        _clear_xbl_preauth_diagnostic()
+        return True
 
     def _fallback(message, stage=None, category=None, response=None):
         if response is not None:
@@ -817,32 +887,9 @@ def xbl_preauth(msa_access_token, expected_account_epoch=None):
             _record_xbl_preauth_diagnostic(
                 stage or "unknown", category)
         warn(message)
-        current_epoch = _account_cache_epoch(cache)
-        current_ready = (
-            current_epoch == account_epoch
-            and _cached_account_matches(cached, account_epoch)
-            and not _online_preauth_problems(cached)
-        )
-        if current_ready:
-            upgraded = _with_winegdk_expiry_epochs(cached)
-            if upgraded != cached:
-                if not _store_online_preauth(
-                        out_path, upgraded, expected_epoch=account_epoch):
-                    warn("Xbox Live pre-auth: account changed while upgrading "
-                         "the cached WineGDK credentials; refusing the old "
-                         "online payload.")
-                    return False
-                cached.clear()
-                cached.update(upgraded)
-                info("Xbox Live pre-auth: upgraded cached token expirations "
-                     "for WineGDK.")
-            info("Xbox Live pre-auth: keeping the complete unexpired cached "
-                 "online tokens.")
-            _clear_xbl_preauth_diagnostic()
-            return True
-        if cached_ready and current_epoch == account_epoch:
-            warn("Xbox Live pre-auth: cached online tokens expired while the "
-                 "refresh was in progress; refusing stale credentials.")
+        # The entry check already refused every incomplete or near-expiry
+        # cache, and time only makes a cache less valid, so nothing here can
+        # resurrect it. Fail closed.
         return False
 
     if not msa_access_token:

@@ -36,7 +36,13 @@ command -v tar >/dev/null || { echo "tar is required." >&2; exit 1; }
 command -v sha256sum >/dev/null || { echo "sha256sum is required." >&2; exit 1; }
 command -v python3 >/dev/null || { echo "python3 is required." >&2; exit 1; }
 
-ENGINE_SELECTION="${MCBE_GDK_ENGINE_RELEASE:-latest}"
+if [[ -n "${MCBE_GDK_ENGINE_RELEASE:-}" ]]; then
+  ENGINE_SELECTION="$MCBE_GDK_ENGINE_RELEASE"
+elif [[ -f "$ROOT/engine-release" ]]; then
+  ENGINE_SELECTION="$(cat "$ROOT/engine-release")"
+else
+  ENGINE_SELECTION="latest"
+fi
 if [[ "$ENGINE_SELECTION" == "latest" ]]; then
   ENGINE_RELEASE="$(
     python3 "$SCRIPT_DIR/scripts/updates.py" latest-tag "$ENGINE_REPO"

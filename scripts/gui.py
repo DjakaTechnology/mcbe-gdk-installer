@@ -28,8 +28,6 @@ except (ImportError, ValueError) as exc:
 ROOT = Path(os.environ["MCBE_GDK_ROOT"]).expanduser().resolve()
 TOOL_ROOT = Path(os.environ.get("MCBE_GDK_TOOL_ROOT") or ".").expanduser().resolve()
 os.environ["BOL_HOME"] = str(ROOT / "profile")
-for path in (ROOT / "lib", TOOL_ROOT / "scripts", TOOL_ROOT):
-    sys.path.insert(0, str(path))
 
 from auth.auth import msa_gamertag, msa_signed_in  # noqa: E402
 from removal import (  # noqa: E402
@@ -40,15 +38,22 @@ from removal import (  # noqa: E402
 )
 from runtime import login, logout  # noqa: E402
 from updates import (  # noqa: E402
+    ENGINE_REPO,
     AvailableUpdates,
     UpdateError,
     check_for_updates,
+    engine_is_ready,
+    fetch_release_tags,
     install_available_updates,
+    read_engine_selection,
+    read_engine_version,
+    switch_engine,
 )
 
 APP_ID = "io.github.veedydev.MCBEGDKInstaller"
 APP_NAME = "MCBE GDK Installer"
-
+ENGINE_PAGE_SIZE = 6
+ENGINE_LOAD_MORE = "Load More…"
 
 def package_button_state(installed: bool, selected: bool) -> tuple[str, bool]:
     if selected:
@@ -197,10 +202,15 @@ class Window(Adw.ApplicationWindow):
         self.engine_downloading = False
         self.was_updating = False
         self.available_updates: AvailableUpdates | None = None
+        self.update_check_generation = 0
         self.updating = False
         self.update_pulsing = False
         self.update_stage: str | None = None
         self.update_log_bucket = -1
+        self.engine_tags: list[str] = []
+        self.engine_tags_available: bool | None = None
+        self.engine_visible_count = ENGINE_PAGE_SIZE - 1
+        self.engine_pending_selection = "Latest"
         self.launch_process: subprocess.Popen | None = None
         self.stopping = False
 
@@ -268,6 +278,41 @@ class Window(Adw.ApplicationWindow):
         self.update_details.set_child(update_log_scroll)
         self.update_group.add(self.update_details)
         content.append(self.update_group)
+
+        engine_group = Adw.PreferencesGroup(title="Compatibility engine")
+        content.append(engine_group)
+        self.engine_row = Adw.ActionRow(title="Engine release")
+        self.engine_row.add_prefix(
+            Gtk.Image(
+                icon_name="system-software-install-symbolic",
+                valign=Gtk.Align.CENTER,
+            )
+        )
+        self.engine_combo = Gtk.DropDown.new_from_strings(["Latest"])
+        self.engine_combo.set_valign(Gtk.Align.CENTER)
+        self.engine_combo.set_sensitive(False)
+        self.engine_combo.update_property(
+            [Gtk.AccessibleProperty.LABEL], ["Engine release"]
+        )
+        self.engine_combo.set_tooltip_text("Choose an engine release")
+        self.engine_combo.connect("notify::selected", self.engine_combo_changed)
+        self.engine_switch_button = Gtk.Button(
+            label="Switch", valign=Gtk.Align.CENTER
+        )
+        self.engine_switch_button.set_sensitive(False)
+        self.engine_switch_button.update_property(
+            [Gtk.AccessibleProperty.LABEL], ["Switch engine release"]
+        )
+        self.engine_switch_button.set_tooltip_text(
+            "Install the selected engine release"
+        )
+        self.engine_switch_button.connect("clicked", self.confirm_engine_switch)
+        engine_suffix = Gtk.Box(spacing=8)
+        engine_suffix.append(self.engine_combo)
+        engine_suffix.append(self.engine_switch_button)
+        self.engine_row.add_suffix(engine_suffix)
+        self.engine_row.set_activatable_widget(self.engine_combo)
+        engine_group.add(self.engine_row)
 
         install_group = Adw.PreferencesGroup(title="Package")
         content.append(install_group)
@@ -350,6 +395,8 @@ class Window(Adw.ApplicationWindow):
 
         self.refresh_install()
         self.refresh_account()
+        self.refresh_engine_row()
+        self.load_engine_tags()
         GLib.timeout_add(100, self.poll)
         GLib.timeout_add(500, self.refresh_launch_state)
         self.check_updates()
@@ -371,18 +418,91 @@ class Window(Adw.ApplicationWindow):
         dialog.present(self)
 
     def check_updates(self) -> None:
+        self.update_check_generation += 1
+        generation = self.update_check_generation
+
         def worker() -> None:
             try:
                 updates = check_for_updates(TOOL_ROOT, ROOT)
             except UpdateError:
                 return
             if updates:
-                self.events.put(("updates_available", updates))
+                self.events.put(("updates_available", updates, generation))
 
         threading.Thread(target=worker, daemon=True).start()
 
+    def engine_selection(self) -> str | None:
+        try:
+            return read_engine_selection(ROOT)
+        except UpdateError:
+            return None
+
+    def refresh_engine_row(self) -> None:
+        installed = read_engine_version(ROOT) or "not installed"
+        selection = self.engine_selection()
+        if selection is None:
+            subtitle = f"{installed} installed · selection unavailable"
+        elif selection == "latest":
+            subtitle = f"{installed} installed · tracking latest"
+        else:
+            subtitle = f"{installed} installed · selected {selection}"
+        if self.engine_tags_available is False:
+            subtitle += " · release list unavailable"
+        self.engine_row.set_subtitle(subtitle)
+
+    def load_engine_tags(self) -> None:
+        def worker() -> None:
+            try:
+                tags = fetch_release_tags(ENGINE_REPO)
+            except UpdateError:
+                self.events.put(("engine_tags", [], False))
+            else:
+                self.events.put(("engine_tags", tags, True))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def show_engine_tags(self, tags: list[str], available: bool) -> None:
+        selection = self.engine_selection()
+        self.engine_tags = tags
+        self.engine_tags_available = available
+        self.engine_visible_count = ENGINE_PAGE_SIZE - 1
+        self.populate_engine_combo(
+            "Latest" if selection in (None, "latest") else selection
+        )
+        sensitive = not (self.installing or self.updating)
+        self.engine_combo.set_sensitive(sensitive)
+        self.engine_switch_button.set_sensitive(sensitive)
+        self.refresh_engine_row()
+
+    def populate_engine_combo(self, selected: str) -> None:
+        entries = ["Latest"] + self.engine_tags[: self.engine_visible_count]
+        if selected not in entries:
+            entries.append(selected)
+        if self.engine_visible_count < len(self.engine_tags):
+            entries.append(ENGINE_LOAD_MORE)
+        self.engine_combo.set_model(Gtk.StringList.new(entries))
+        self.engine_combo.set_selected(entries.index(selected))
+        self.engine_pending_selection = selected
+
+    def engine_combo_changed(
+        self, combo: Gtk.DropDown, _param
+    ) -> None:
+        item = combo.get_selected_item()
+        if not item:
+            return
+        selected = item.get_string()
+        if selected == ENGINE_LOAD_MORE:
+            self.engine_visible_count += ENGINE_PAGE_SIZE
+            GLib.idle_add(
+                self.populate_engine_combo, self.engine_pending_selection
+            )
+        else:
+            self.engine_pending_selection = selected
+
     def show_updates(self, updates: AvailableUpdates) -> None:
         self.available_updates = updates
+        if self.installing or self.updating:
+            return
         if updates.installer and updates.engine:
             title = "Installer and engine updates are available"
             subtitle = (
@@ -407,7 +527,7 @@ class Window(Adw.ApplicationWindow):
 
     def review_update(self, _button: Gtk.Button) -> None:
         updates = self.available_updates
-        if not updates or self.updating:
+        if not updates or self.installing or self.updating:
             return
         dialog = Adw.AlertDialog(
             heading="Install available updates?",
@@ -465,7 +585,7 @@ class Window(Adw.ApplicationWindow):
 
     def update_response(self, _dialog: Adw.AlertDialog, response: str) -> None:
         updates = self.available_updates
-        if response != "update" or not updates:
+        if response != "update" or not updates or self.installing or self.updating:
             return
         if minecraft_launcher_pid(ROOT):
             self.error(
@@ -473,25 +593,7 @@ class Window(Adw.ApplicationWindow):
                 "Installer files cannot be replaced while Minecraft is running.",
             )
             return
-        self.updating = True
-        self.update_pulsing = True
-        self.update_stage = None
-        self.update_log_bucket = -1
-        self.update_row.set_title("Preparing updates…")
-        self.update_row.set_subtitle("Starting the verified update.")
-        self.update_button.set_visible(False)
-        self.update_spinner.set_visible(True)
-        self.update_spinner.start()
-        self.update_progress.set_visible(True)
-        self.update_progress.set_fraction(0)
-        self.update_progress.pulse()
-        self.update_details.set_visible(True)
-        self.update_log.get_buffer().set_text("Preparing selected updates…\n")
-        GLib.timeout_add(120, self.pulse_update_progress)
-        self.install_button.set_sensitive(False)
-        self.login_button.set_sensitive(False)
-        self.logout_button.set_sensitive(False)
-        self.refresh_launch_state()
+        self.begin_update_ui("Preparing updates…", "Starting the verified update.")
 
         def worker() -> None:
             try:
@@ -509,6 +611,106 @@ class Window(Adw.ApplicationWindow):
                 self.events.put(("updates_done", restart))
             except Exception as exc:
                 self.events.put(("update_error", str(exc)))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def begin_update_ui(self, title: str, subtitle: str) -> None:
+        self.update_check_generation += 1
+        self.updating = True
+        self.update_pulsing = True
+        self.update_stage = None
+        self.update_log_bucket = -1
+        self.update_group.set_visible(True)
+        self.update_row.set_title(title)
+        self.update_row.set_subtitle(subtitle)
+        self.update_button.set_visible(False)
+        self.update_spinner.set_visible(True)
+        self.update_spinner.start()
+        self.update_progress.set_visible(True)
+        self.update_progress.set_fraction(0)
+        self.update_progress.pulse()
+        self.update_details.set_visible(True)
+        self.update_log.get_buffer().set_text(subtitle + "\n")
+        GLib.timeout_add(120, self.pulse_update_progress)
+        self.install_button.set_sensitive(False)
+        self.login_button.set_sensitive(False)
+        self.logout_button.set_sensitive(False)
+        self.engine_combo.set_sensitive(False)
+        self.engine_switch_button.set_sensitive(False)
+        self.refresh_launch_state()
+
+    def confirm_engine_switch(self, _button: Gtk.Button) -> None:
+        if self.installing or self.updating:
+            return
+        selected = self.engine_pending_selection
+        if selected == "Latest":
+            selected = "latest"
+        selection = self.engine_selection()
+        current = read_engine_version(ROOT)
+        ready = (
+            current not in (None, "v0.0.0")
+            and engine_is_ready(ROOT, current)
+            and (selected == "latest" or selected == current)
+        )
+        if selection is not None and selected == selection and ready:
+            target = "the latest release" if selected == "latest" else selected
+            self.toast(f"Compatibility engine already set to {target}")
+            return
+        if minecraft_launcher_pid(ROOT):
+            self.error(
+                "Close Minecraft before switching",
+                "Engine files cannot be replaced while Minecraft is running.",
+            )
+            return
+        target = "the latest release" if selected == "latest" else selected
+        if current:
+            action = (
+                f"Engine {current} will be set to {target}; "
+                "it is installed only if needed."
+            )
+        elif selected == "latest":
+            action = "The latest verified engine release will be installed."
+        else:
+            action = f"Engine {selected} will be installed."
+        dialog = Adw.AlertDialog(
+            heading="Switch compatibility engine?",
+            body=f"{action} Worlds and account data are preserved.",
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("switch", "Switch")
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+        dialog.set_response_appearance(
+            "switch", Adw.ResponseAppearance.SUGGESTED
+        )
+        dialog.connect("response", self.engine_switch_response, selected)
+        dialog.present(self)
+
+    def engine_switch_response(
+        self, _dialog: Adw.AlertDialog, response: str, selected: str
+    ) -> None:
+        if response != "switch":
+            return
+        label = "Latest" if selected == "latest" else selected
+        self.begin_update_ui(
+            f"Switching compatibility engine to {label}…",
+            "Resolving the verified engine release.",
+        )
+
+        def worker() -> None:
+            try:
+                def progress(
+                    stage: str,
+                    current: int | None,
+                    total: int | None,
+                ) -> None:
+                    self.events.put(("update_progress", stage, current, total))
+
+                with runtime_lock(ROOT):
+                    release = switch_engine(ROOT, selected, progress)
+                self.events.put(("engine_switch_done", release.tag))
+            except Exception as exc:
+                self.events.put(("engine_switch_error", str(exc)))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -674,9 +876,13 @@ class Window(Adw.ApplicationWindow):
         response: str,
         reset: Gtk.CheckButton,
     ) -> None:
-        if response != "uninstall":
+        if response != "uninstall" or self.installing or self.updating:
             return
         remove_user_data = reset.get_active()
+        self.installing = True
+        self.engine_combo.set_sensitive(False)
+        self.engine_switch_button.set_sensitive(False)
+        self.refresh_launch_state()
         self.install_button.set_sensitive(False)
         self.install_row.set_title("Uninstalling…")
 
@@ -691,6 +897,8 @@ class Window(Adw.ApplicationWindow):
         threading.Thread(target=worker, daemon=True).start()
 
     def install(self, _button: Gtk.Button) -> None:
+        if self.installing or self.updating:
+            return
         package = self.package
         installer = TOOL_ROOT / "easy-install.sh"
         if not package or not package.is_file():
@@ -705,6 +913,11 @@ class Window(Adw.ApplicationWindow):
         updating = self.is_installed()
         self.was_updating = updating
         self.installing = True
+        self.update_check_generation += 1
+        self.available_updates = None
+        self.update_group.set_visible(False)
+        self.engine_combo.set_sensitive(False)
+        self.engine_switch_button.set_sensitive(False)
         self.engine_downloading = False
         self.install_button.set_sensitive(False)
         self.install_row.set_title("Preparing update…" if updating else "Preparing installation…")
@@ -758,6 +971,9 @@ class Window(Adw.ApplicationWindow):
         )
         self.login_button.set_visible(not signed_in)
         self.logout_button.set_visible(signed_in)
+        sensitive = not (self.installing or self.updating)
+        self.login_button.set_sensitive(sensitive and not signed_in)
+        self.logout_button.set_sensitive(sensitive and signed_in)
 
     def sign_in(self, _button: Gtk.Button) -> None:
         self.login_button.set_sensitive(False)
@@ -961,9 +1177,18 @@ class Window(Adw.ApplicationWindow):
                         )
                         self.install_button.set_sensitive(True)
                         self.error("Installation failed", "Review the installation details.")
+                    self.engine_combo.set_sensitive(True)
+                    self.engine_switch_button.set_sensitive(True)
+                    self.refresh_engine_row()
+                    self.check_updates()
                 elif kind == "uninstall_done":
+                    self.installing = False
+                    self.engine_combo.set_sensitive(True)
+                    self.engine_switch_button.set_sensitive(True)
+                    self.refresh_engine_row()
                     self.refresh_install()
                     self.refresh_account()
+                    self.refresh_launch_state()
                     self.toast(
                         "Minecraft and user data removed"
                         if event[1]
@@ -979,8 +1204,11 @@ class Window(Adw.ApplicationWindow):
                         self.toast("Microsoft account connected")
                     else:
                         self.error("Sign in failed", "Microsoft sign-in did not complete.")
+                elif kind == "engine_tags":
+                    self.show_engine_tags(event[1], event[2])
                 elif kind == "updates_available":
-                    self.show_updates(event[1])
+                    if event[2] == self.update_check_generation:
+                        self.show_updates(event[1])
                 elif kind == "update_progress":
                     self.show_update_progress(event[1], event[2], event[3])
                 elif kind == "updates_done":
@@ -991,6 +1219,9 @@ class Window(Adw.ApplicationWindow):
                     self.update_progress.set_visible(False)
                     self.available_updates = None
                     self.update_group.set_visible(False)
+                    self.engine_combo.set_sensitive(True)
+                    self.engine_switch_button.set_sensitive(True)
+                    self.refresh_engine_row()
                     self.refresh_install()
                     self.refresh_account()
                     if event[1]:
@@ -1014,8 +1245,58 @@ class Window(Adw.ApplicationWindow):
                     self.install_button.set_sensitive(True)
                     self.login_button.set_sensitive(not msa_signed_in())
                     self.logout_button.set_sensitive(msa_signed_in())
+                    self.engine_combo.set_sensitive(True)
+                    self.engine_switch_button.set_sensitive(True)
+                    self.refresh_engine_row()
                     self.refresh_launch_state()
                     self.error("Update failed", event[1])
+                elif kind == "engine_switch_done":
+                    pending_installer = (
+                        self.available_updates.installer
+                        if self.available_updates
+                        else None
+                    )
+                    self.updating = False
+                    self.update_pulsing = False
+                    self.update_spinner.stop()
+                    self.update_spinner.set_visible(False)
+                    self.update_progress.set_visible(False)
+                    self.available_updates = None
+                    self.update_group.set_visible(False)
+                    self.update_details.set_visible(False)
+                    self.engine_combo.set_sensitive(True)
+                    self.engine_switch_button.set_sensitive(True)
+                    self.refresh_engine_row()
+                    self.refresh_install()
+                    self.refresh_account()
+                    self.refresh_launch_state()
+                    self.toast(f"Compatibility engine switched to {event[1]}")
+                    if pending_installer:
+                        self.show_updates(AvailableUpdates(installer=pending_installer))
+                    self.check_updates()
+                elif kind == "engine_switch_error":
+                    pending_updates = self.available_updates
+                    self.updating = False
+                    self.update_pulsing = False
+                    self.update_spinner.stop()
+                    self.update_spinner.set_visible(False)
+                    self.update_progress.set_visible(False)
+                    self.update_row.set_title("Engine switch failed")
+                    self.update_row.set_subtitle(
+                        "Open Update details for the error, then try again."
+                    )
+                    self.update_details.set_visible(True)
+                    self.write_update_detail(f"\nError: {event[1]}\n")
+                    self.engine_combo.set_sensitive(True)
+                    self.engine_switch_button.set_sensitive(True)
+                    self.refresh_engine_row()
+                    self.refresh_install()
+                    self.refresh_account()
+                    self.refresh_launch_state()
+                    self.error("Engine switch failed", event[1])
+                    if pending_updates:
+                        self.show_updates(pending_updates)
+                    self.check_updates()
                 elif kind == "error":
                     self.installing = False
                     self.engine_downloading = False
@@ -1025,6 +1306,11 @@ class Window(Adw.ApplicationWindow):
                         self.signin_dialog.close()
                         self.signin_dialog = None
                     self.login_button.set_sensitive(True)
+                    sensitive = not self.updating
+                    self.engine_combo.set_sensitive(sensitive)
+                    self.engine_switch_button.set_sensitive(sensitive)
+                    self.refresh_engine_row()
+                    self.refresh_launch_state()
                     self.refresh_install()
                     self.refresh_account()
                     self.error(APP_NAME, event[1])

@@ -50,6 +50,10 @@ Advanced Proton/Wine diagnostics are disabled by default because their
 synchronous D3D12 and GameCore traces can significantly reduce performance.
 The launcher also gives the custom engine persistent VKD3D, DXVK, and NVIDIA
 shader-cache directories.
+Before launch, one advisory notification is emitted when available memory is
+below 3072 MiB, free installation-disk space is below 5120 MiB, render
+distance exceeds 32 chunks, or windowed VSync is enabled on Wayland. These are
+warnings only; details are written to `profile/logs/desktop-launch.log`.
 
 The bundled engine includes NTSync and selects its in-process synchronization
 path when it can open `/dev/ntsync`. Legacy GE-Proton switches such as
@@ -64,6 +68,13 @@ distribution backport, loading the NTSync module, and repairing the device node
 or its permissions as named. `static prerequisites present` only confirms the
 launcher-side checks—it does not prove live use or promise a particular FPS
 gain.
+
+To disable unused DirectX Raytracing support and reduce its VRAM overhead for
+one launch, keep the required raw-CBV compatibility flag and add `nodxr` with:
+
+```bash
+MCBE_GDK_DISABLE_DXR=1 mcbe-gdk-linux launch
+```
 
 Some GDK builds contain additional validation and debugging code, so world
 creation and addon loading can remain slower than a stable retail client. To
