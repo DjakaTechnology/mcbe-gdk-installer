@@ -16,7 +16,8 @@ Commands:
   login               Connect a Microsoft/Xbox account
   logout              Disconnect the saved account
   status              Show account status
-  update              Install available installer and engine updates
+  update              Install selected installer and engine updates
+  engine [VERSION]    Show or switch engine (for example: 0.1.5 or latest)
   recover             Acknowledge GPU recovery after troubleshooting
   setup-env [--fish]  Print the COM_MOJANG environment command
   help                Show this help
@@ -48,6 +49,15 @@ case "$command" in
       exit 1
     }
     exec python3 "$ROOT/lib/updates.py" install "$tool_root" "$ROOT"
+    ;;
+  engine)
+    mkdir -p "$BOL_HOME"
+    exec 9>"$BOL_HOME/.desktop-launch.lock"
+    flock -n 9 || {
+      echo "Minecraft or another MCBE GDK command is running; try again after it closes." >&2
+      exit 1
+    }
+    exec python3 "$ROOT/lib/updates.py" engine "$ROOT" "$@"
     ;;
   recover)
     exec "$ROOT/lib/recover.sh" "$@"

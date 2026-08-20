@@ -138,8 +138,11 @@ Already have the Minecraft game files? Follow
 Rerun the same installation command after `git pull` to update an existing
 installation.
 
-Set `MCBE_GDK_ENGINE_RELEASE=vX.Y.Z` to install a specific engine release for
-testing or rollback.
+The latest engine release is selected by default. Use
+`mcbe-gdk-linux engine 0.1.5` to switch to `v0.1.5` without reinstalling the
+game. Versions may include or omit the `v`; use `latest` to resume tracking new
+engine releases. The selection persists across normal updates. For unattended
+initial installs, set `MCBE_GDK_ENGINE_RELEASE=vX.Y.Z`.
 
 ## Commands
 
@@ -153,6 +156,7 @@ testing or rollback.
 | Sign in | `mcbe-gdk-linux login` |
 | Sign out | `mcbe-gdk-linux logout` |
 | Install available updates | `mcbe-gdk-linux update` |
+| Show or switch engine release | `mcbe-gdk-linux engine [VERSION\|latest]` |
 | Recover after GPU troubleshooting | `mcbe-gdk-linux recover` |
 | Print the `COM_MOJANG` environment command | `mcbe-gdk-linux setup-env` |
 | Remove launchers | `./uninstall.sh` |

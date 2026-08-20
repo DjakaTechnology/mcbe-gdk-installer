@@ -36,9 +36,14 @@ command -v tar >/dev/null || { echo "tar is required." >&2; exit 1; }
 command -v sha256sum >/dev/null || { echo "sha256sum is required." >&2; exit 1; }
 command -v python3 >/dev/null || { echo "python3 is required." >&2; exit 1; }
 
-ENGINE_RELEASE="${MCBE_GDK_ENGINE_RELEASE:-$(
-  python3 "$SCRIPT_DIR/scripts/updates.py" latest-tag "$ENGINE_REPO"
-)}"
+ENGINE_SELECTION="${MCBE_GDK_ENGINE_RELEASE:-latest}"
+if [[ "$ENGINE_SELECTION" == "latest" ]]; then
+  ENGINE_RELEASE="$(
+    python3 "$SCRIPT_DIR/scripts/updates.py" latest-tag "$ENGINE_REPO"
+  )"
+else
+  ENGINE_RELEASE="$ENGINE_SELECTION"
+fi
 [[ "$ENGINE_RELEASE" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
   echo "The engine release version is invalid: $ENGINE_RELEASE" >&2
   exit 1
@@ -79,6 +84,7 @@ curl -fL --retry 3 "$RELEASE_URL/$ENGINE_ASSET.sha256" -o "$TMP/$ENGINE_ASSET.sh
 echo "Installing the MCBE GDK compatibility engine..."
 rm -rf "$ROOT/engine/GDK-Proton-mcbe-gdk"
 tar -xzf "$TMP/$ENGINE_ASSET" -C "$ROOT/engine"
+printf '%s\n' "$ENGINE_SELECTION" >"$ROOT/engine-release"
 
 launcher_args=("$ROOT" "$SCRIPT_DIR")
 [[ -z "$SHORTCUT_POLICY" ]] || launcher_args+=("$SHORTCUT_POLICY")

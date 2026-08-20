@@ -16,12 +16,13 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Callable
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
 
 INSTALLER_REPO = "veedy-dev/mcbe-gdk-installer"
 ENGINE_REPO = "veedy-dev/mcbe-gdk-engine"
 VERSION_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
+ENGINE_SELECTION_FILE = "engine-release"
 API_VERSION = "2022-11-28"
 MAX_RELEASE_JSON = 1_000_000
 ProgressCallback = Callable[[str, int | None, int | None], None]
@@ -61,6 +62,16 @@ def is_newer(candidate: str, current: str) -> bool:
     return version_tuple(candidate) > version_tuple(current)
 
 
+def normalize_engine_selection(value: str) -> str:
+    value = value.strip()
+    if value == "latest":
+        return value
+    if re.fullmatch(r"\d+\.\d+\.\d+", value):
+        value = f"v{value}"
+    version_tuple(value)
+    return value
+
+
 def _github_url(url: str, repo: str, *, download: bool = False) -> str:
     parsed = urlparse(url)
     expected = f"/{repo}/releases/"
@@ -73,9 +84,16 @@ def _github_url(url: str, repo: str, *, download: bool = False) -> str:
     return url
 
 
-def fetch_latest_release(repo: str, *, timeout: int = 10) -> Release:
+def fetch_release(
+    repo: str, tag: str | None = None, *, timeout: int = 10
+) -> Release:
+    if tag is None or tag == "latest":
+        endpoint = "releases/latest"
+    else:
+        tag = normalize_engine_selection(tag)
+        endpoint = f"releases/tags/{quote(tag, safe='')}"
     request = Request(
-        f"https://api.github.com/repos/{repo}/releases/latest",
+        f"https://api.github.com/repos/{repo}/{endpoint}",
         headers={
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": API_VERSION,
@@ -91,8 +109,8 @@ def fetch_latest_release(repo: str, *, timeout: int = 10) -> Release:
         raise UpdateError("GitHub returned an unexpectedly large release response.")
     try:
         data = json.loads(raw)
-        tag = str(data["tag_name"])
-        version_tuple(tag)
+        release_tag = str(data["tag_name"])
+        version_tuple(release_tag)
         assets = {
             str(asset["name"]): _github_url(
                 str(asset["browser_download_url"]), repo, download=True
@@ -102,14 +120,18 @@ def fetch_latest_release(repo: str, *, timeout: int = 10) -> Release:
         }
         return Release(
             repo=repo,
-            tag=tag,
-            name=str(data.get("name") or tag)[:200],
+            tag=release_tag,
+            name=str(data.get("name") or release_tag)[:200],
             body=str(data.get("body") or "")[:20_000],
             url=_github_url(str(data["html_url"]), repo),
             assets=assets,
         )
     except (KeyError, TypeError, ValueError, UpdateError) as exc:
         raise UpdateError("GitHub returned invalid release metadata.") from exc
+
+
+def fetch_latest_release(repo: str, *, timeout: int = 10) -> Release:
+    return fetch_release(repo, timeout=timeout)
 
 
 def read_installer_version(tool_root: Path) -> str:
@@ -133,6 +155,16 @@ def read_engine_version(root: Path) -> str | None:
         return "v0.0.0"
 
 
+def read_engine_selection(root: Path) -> str:
+    selection = root / ENGINE_SELECTION_FILE
+    if not selection.is_file():
+        return "latest"
+    try:
+        return normalize_engine_selection(selection.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise UpdateError("The selected engine release is unavailable.") from exc
+
+
 def check_for_updates(
     tool_root: Path,
     root: Path,
@@ -144,7 +176,8 @@ def check_for_updates(
     except UpdateError:
         installer = None
     try:
-        engine = fetch_latest_release(ENGINE_REPO)
+        selection = read_engine_selection(root)
+        engine = fetch_release(ENGINE_REPO, selection)
     except UpdateError:
         engine = None
     if raise_if_unavailable and installer is None and engine is None:
@@ -155,7 +188,7 @@ def check_for_updates(
         if installer and is_newer(installer.tag, read_installer_version(tool_root))
         else None,
         engine=engine
-        if engine and current_engine and is_newer(engine.tag, current_engine)
+        if engine and current_engine and engine.tag != current_engine
         else None,
     )
 
@@ -412,6 +445,47 @@ def _install_updates_cli(tool_root: Path, root: Path) -> int:
     return 0
 
 
+def _engine_cli(root: Path, selection: str | None) -> int:
+    current = read_engine_version(root)
+    selection_file = root / ENGINE_SELECTION_FILE
+    if selection is None:
+        selected = (
+            selection_file.read_text(encoding="utf-8").strip()
+            if selection_file.is_file()
+            else "not set"
+        )
+        print(f"Current engine: {current or 'not installed'}")
+        print(f"Selected engine: {selected}")
+        return 0
+
+    selected = normalize_engine_selection(selection)
+    print(f"Resolving compatibility engine {selected}…")
+    release = fetch_release(ENGINE_REPO, selected)
+    if current == release.tag:
+        root.mkdir(parents=True, exist_ok=True)
+        selection_file.write_text(selected + "\n", encoding="utf-8")
+        print(f"Compatibility engine {release.tag} is already installed.")
+        return 0
+
+    seen: set[str] = set()
+    labels = {
+        "engine_download": "Downloading compatibility engine",
+        "engine_verify": "Verifying compatibility engine",
+        "engine_install": "Installing compatibility engine",
+        "engine_done": "Compatibility engine installed",
+    }
+
+    def progress(stage: str, _current: int | None, _total: int | None) -> None:
+        if stage not in seen:
+            seen.add(stage)
+            print(f"{labels.get(stage, 'Switching compatibility engine')}…")
+
+    install_engine_update(release, root, progress)
+    selection_file.write_text(selected + "\n", encoding="utf-8")
+    print(f"Switched compatibility engine to {release.tag}.")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     if len(argv) == 3 and argv[1] == "latest-tag":
         try:
@@ -429,8 +503,18 @@ def main(argv: list[str]) -> int:
         except (OSError, subprocess.SubprocessError, UpdateError) as exc:
             print(f"Update failed: {exc}", file=sys.stderr)
             return 1
+    if len(argv) in (3, 4) and argv[1] == "engine":
+        try:
+            return _engine_cli(
+                Path(argv[2]).expanduser().resolve(),
+                argv[3] if len(argv) == 4 else None,
+            )
+        except (OSError, subprocess.SubprocessError, UpdateError) as exc:
+            print(f"Engine switch failed: {exc}", file=sys.stderr)
+            return 1
     print(
-        f"Usage: {argv[0]} latest-tag OWNER/REPOSITORY | install SOURCE ROOT",
+        f"Usage: {argv[0]} latest-tag OWNER/REPOSITORY | "
+        "install SOURCE ROOT | engine ROOT [VERSION|latest]",
         file=sys.stderr,
     )
     return 2
