@@ -48,6 +48,7 @@ class CliTest(unittest.TestCase):
                 [command, "help"], env=env, capture_output=True, text=True
             )
             self.assertIn("update", help_result.stdout)
+            self.assertIn("engine [VERSION]", help_result.stdout)
             self.assertIn("setup-env", help_result.stdout)
 
             (root / "lib/updates.py").write_text(
@@ -65,6 +66,19 @@ class CliTest(unittest.TestCase):
             self.assertEqual(
                 update_result.stdout.strip(),
                 f"install|{repo}|{root}",
+            )
+
+            engine_result = subprocess.run(
+                [command, "engine", "0.1.5"],
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(engine_result.returncode, 0, engine_result.stderr)
+            self.assertEqual(
+                engine_result.stdout.strip(),
+                f"engine|{root}|0.1.5",
             )
 
             installer_entry = (

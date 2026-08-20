@@ -47,6 +47,12 @@ class NativePackageInstallTest(unittest.TestCase):
             )
             self.assertEqual(bootstrap.read_bytes(), b"required")
             self.assertFalse(disabled.exists())
+            self.assertEqual(
+                (
+                    root / "share/mcbe-gdk-linux/engine-release"
+                ).read_text().strip(),
+                "v0.1.2",
+            )
 
     def test_test_crypted_msixvc_is_extracted_and_installed(self):
         repo = Path(__file__).resolve().parents[1]

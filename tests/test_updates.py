@@ -21,12 +21,15 @@ from updates import (  # noqa: E402
     Release,
     UpdateError,
     _download_verified,
+    _engine_cli,
     _install_updates_cli,
     _validate_archive,
     _verify_checksum,
     check_for_updates,
     fetch_latest_release,
+    fetch_release,
     is_newer,
+    normalize_engine_selection,
 )
 
 
@@ -73,6 +76,13 @@ class UpdateTests(unittest.TestCase):
         with self.assertRaises(UpdateError):
             is_newer("latest", "v0.1.2")
 
+    def test_engine_selection_accepts_cli_versions(self):
+        self.assertEqual(normalize_engine_selection("0.1.5"), "v0.1.5")
+        self.assertEqual(normalize_engine_selection("v0.1.5"), "v0.1.5")
+        self.assertEqual(normalize_engine_selection("latest"), "latest")
+        with self.assertRaises(UpdateError):
+            normalize_engine_selection("main")
+
     def test_latest_release_metadata_is_validated(self):
         repo = INSTALLER_REPO
         data = {
@@ -114,18 +124,63 @@ class UpdateTests(unittest.TestCase):
             )
             with patch(
                 "updates.fetch_latest_release",
-                side_effect=[release(INSTALLER_REPO, "v0.1.3"), UpdateError("offline")],
-            ):
+                return_value=release(INSTALLER_REPO, "v0.1.3"),
+            ), patch(
+                "updates.fetch_release", side_effect=UpdateError("offline")
+            ) as fetch:
                 available = check_for_updates(tool, root)
             self.assertEqual(available.installer.tag, "v0.1.3")
             self.assertIsNone(available.engine)
+            fetch.assert_called_once_with(ENGINE_REPO, "latest")
 
             with patch(
-                "updates.fetch_latest_release",
-                side_effect=UpdateError("offline"),
+                "updates.fetch_latest_release", side_effect=UpdateError("offline")
+            ), patch(
+                "updates.fetch_release", side_effect=UpdateError("offline")
             ):
                 with self.assertRaises(UpdateError):
                     check_for_updates(tool, root, raise_if_unavailable=True)
+
+    def test_selected_engine_release_can_downgrade(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            tool = root / "source"
+            tool.mkdir()
+            (tool / "VERSION").write_text("v0.1.3\n")
+            (root / "engine-release").write_text("v0.1.5\n")
+            engine = root / "engine/GDK-Proton-mcbe-gdk"
+            engine.mkdir(parents=True)
+            (engine / "engine-manifest.json").write_text(
+                json.dumps({"version": "v0.1.7"})
+            )
+            selected = release(ENGINE_REPO, "v0.1.5")
+            with patch(
+                "updates.fetch_latest_release",
+                return_value=release(INSTALLER_REPO, "v0.1.3"),
+            ), patch("updates.fetch_release", return_value=selected) as fetch:
+                available = check_for_updates(tool, root)
+            self.assertEqual(available.engine, selected)
+            fetch.assert_called_once_with(ENGINE_REPO, "v0.1.5")
+
+    def test_engine_cli_switches_and_persists_selection(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            engine = root / "engine/GDK-Proton-mcbe-gdk"
+            engine.mkdir(parents=True)
+            (engine / "engine-manifest.json").write_text(
+                json.dumps({"version": "v0.1.7"})
+            )
+            selected = release(ENGINE_REPO, "v0.1.5")
+            output = io.StringIO()
+            with patch("updates.fetch_release", return_value=selected) as fetch, patch(
+                "updates.install_engine_update"
+            ) as install, redirect_stdout(output):
+                result = _engine_cli(root, "0.1.5")
+            self.assertEqual(result, 0)
+            self.assertEqual((root / "engine-release").read_text(), "v0.1.5\n")
+            fetch.assert_called_once_with(ENGINE_REPO, "v0.1.5")
+            install.assert_called_once()
+            self.assertIn("Switched compatibility engine to v0.1.5.", output.getvalue())
 
     def test_checksum_and_archive_paths_are_verified(self):
         with tempfile.TemporaryDirectory() as temporary:
