@@ -19,16 +19,27 @@ from typing import Callable
 from urllib.parse import quote, unquote, urlparse
 from urllib.request import Request, urlopen
 
+from auth.engine_profiles import (
+    CUSTOM_ENGINE_METADATA,
+    EngineProfile,
+    profile_for_repository,
+    read_custom_engine_metadata,
+)
+from auth.game_profile import apply_installed_engine_profile
+from auth.log import BolError
+
 INSTALLER_REPO = "veedy-dev/mcbe-gdk-installer"
 ENGINE_REPO = "veedy-dev/mcbe-gdk-engine"
 VERSION_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 ENGINE_SELECTION_FILE = "engine-release"
-CUSTOM_ENGINE_METADATA = ".mcbe-gdk-engine.json"
 API_VERSION = "2022-11-28"
 MAX_RELEASE_JSON = 1_000_000
 MAX_RELEASE_LIST_JSON = 10_000_000
-LUKAS_ENGINE_PROFILE = "lukas-remote-connect-v1"
-LUKAS_ENGINE_REPO = "LukasPAH/GDK-Proton-Custom"
+MAX_ARCHIVE_MEMBERS = 200_000
+MAX_ARCHIVE_PATH = 4096
+MAX_ARCHIVE_MEMBER = 2_500_000_000
+MAX_INSTALLER_UNPACKED = 100_000_000
+MAX_ENGINE_UNPACKED = 8_000_000_000
 ProgressCallback = Callable[[str, int | None, int | None], None]
 
 
@@ -268,25 +279,29 @@ def read_installer_version(tool_root: Path) -> str:
         return "v0.0.0"
 
 
-def _read_custom_engine_metadata(root: Path) -> dict[str, str] | None:
-    metadata = root / f"engine/GDK-Proton-mcbe-gdk/{CUSTOM_ENGINE_METADATA}"
-    try:
-        data = json.loads(metadata.read_text(encoding="utf-8"))
-        required = ("repository", "tag", "asset", "url", "sha256")
-        if data.get("schema") != 1 or any(
-            not isinstance(data.get(key), str) or not data[key] for key in required
-        ):
-            return None
-        result = {key: data[key] for key in required}
-        if isinstance(data.get("profile"), str) and data["profile"]:
-            result["profile"] = data["profile"]
-        return result
-    except (OSError, TypeError, ValueError):
-        return None
-
+def _installed_engine_hashes(engine: Path) -> dict[str, str]:
+    required = (
+        "proton",
+        "files/bin/wine",
+        "files/bin/wineserver",
+    )
+    optional = ("files/lib/wine/x86_64-windows/xgameruntime.dll",)
+    hashes = {}
+    for relative in (*required, *optional):
+        path = engine / relative
+        if not path.is_file():
+            if relative in optional:
+                continue
+            raise UpdateError(f"Installed engine is missing {relative}.")
+        digest = hashlib.sha256()
+        with path.open("rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(chunk)
+        hashes[relative] = digest.hexdigest()
+    return hashes
 
 def read_engine_version(root: Path) -> str | None:
-    custom = _read_custom_engine_metadata(root)
+    custom = read_custom_engine_metadata(root)
     if custom:
         return f"{custom['repository']}@{custom['tag']}"
     manifest = root / "engine/GDK-Proton-mcbe-gdk/engine-manifest.json"
@@ -457,11 +472,24 @@ def _download_custom_engine(
 
 
 def _validate_archive(
-    archive: Path, expected_root: str | None, *, links: bool
+    archive: Path,
+    expected_root: str | None,
+    *,
+    links: bool,
+    max_unpacked: int,
 ) -> str:
     archive_root = expected_root
-    with tarfile.open(archive, "r:gz") as bundle:
-        for member in bundle.getmembers():
+    unpacked = 0
+    try:
+        bundle = tarfile.open(archive, "r:gz")
+    except (OSError, tarfile.TarError) as exc:
+        raise UpdateError("Release archive is not a readable tar.gz file.") from exc
+    with bundle:
+        for count, member in enumerate(bundle, 1):
+            if count > MAX_ARCHIVE_MEMBERS:
+                raise UpdateError("Release archive contains too many entries.")
+            if len(member.name) > MAX_ARCHIVE_PATH:
+                raise UpdateError("Release archive contains an overlong path.")
             path = PurePosixPath(member.name)
             if path.is_absolute() or ".." in path.parts or not path.parts:
                 raise UpdateError("Release archive contains an unsafe path.")
@@ -470,7 +498,17 @@ def _validate_archive(
                 archive_root = member_root
             elif member_root != archive_root:
                 raise UpdateError("Release archive has an unexpected root directory.")
-            if member.isdev() or member.isfifo():
+            if member.size > MAX_ARCHIVE_MEMBER:
+                raise UpdateError("Release archive contains an oversized file.")
+            if member.isfile():
+                unpacked += member.size
+                if unpacked > max_unpacked:
+                    raise UpdateError("Release archive expands beyond its size limit.")
+            elif not (
+                member.isdir()
+                or member.issym()
+                or member.islnk()
+            ):
                 raise UpdateError("Release archive contains an unsupported file.")
             if member.issym() or member.islnk():
                 if not links:
@@ -484,8 +522,21 @@ def _validate_archive(
     return archive_root
 
 
+def _extract_archive(archive: Path, destination: Path) -> None:
+    try:
+        with tarfile.open(archive, "r:gz") as bundle:
+            bundle.extractall(destination, filter="data")
+    except (OSError, tarfile.TarError) as exc:
+        raise UpdateError("Could not safely extract the release archive.") from exc
+
+
 def _validate_custom_engine_archive(archive: Path) -> str:
-    archive_root = _validate_archive(archive, None, links=True)
+    archive_root = _validate_archive(
+        archive,
+        None,
+        links=True,
+        max_unpacked=MAX_ENGINE_UNPACKED,
+    )
     required = (
         f"{archive_root}/proton",
         f"{archive_root}/files/bin/wine",
@@ -502,32 +553,36 @@ def _validate_custom_engine_archive(archive: Path) -> str:
 
 
 def _custom_engine_is_ready(root: Path, asset: CustomEngineAsset) -> bool:
-    metadata = _read_custom_engine_metadata(root)
+    metadata = read_custom_engine_metadata(root)
     engine = root / "engine/GDK-Proton-mcbe-gdk"
-    required = (
-        engine / "proton",
-        engine / "files/bin/wine",
-        engine / "files/bin/wineserver",
-    )
-    return bool(
-        metadata
-        and metadata["url"] == asset.url
-        and metadata["sha256"] == asset.sha256
-        and all(path.is_file() and os.access(path, os.X_OK) for path in required)
-    )
+    if (
+        not metadata
+        or metadata.get("schema") != 2
+        or metadata["url"] != asset.url
+        or metadata["sha256"] != asset.sha256
+        or not isinstance(metadata.get("installed_sha256"), dict)
+    ):
+        return False
+    try:
+        return _installed_engine_hashes(engine) == metadata["installed_sha256"]
+    except UpdateError:
+        return False
 
 
 def _apply_custom_engine_profile(
     source: Path, asset: CustomEngineAsset
-) -> str | None:
-    if asset.repo.casefold() != LUKAS_ENGINE_REPO.casefold():
+) -> EngineProfile | None:
+    profile = profile_for_repository(asset.repo)
+    if not profile:
         return None
+    if not profile.patch_gaming_services_gate:
+        return profile
 
     runtime = source / "files/lib/wine/x86_64-windows/xgameruntime.dll"
     try:
         payload = runtime.read_bytes()
     except OSError as exc:
-        raise UpdateError("Lukas engine is missing xgameruntime.dll.") from exc
+        raise UpdateError("Profiled engine is missing xgameruntime.dll.") from exc
     version_gate = bytes.fromhex("81 fe 4d 11 00 00 76 e4")
     patched_gate = bytes.fromhex("81 fe ff ff ff ff 76 e4")
     unpatched_count = payload.count(version_gate)
@@ -535,8 +590,8 @@ def _apply_custom_engine_profile(
     if unpatched_count == 1 and patched_count == 0:
         runtime.write_bytes(payload.replace(version_gate, patched_gate, 1))
     elif unpatched_count > 1 or (unpatched_count and patched_count):
-        raise UpdateError("Lukas engine has an ambiguous Gaming Services gate.")
-    return LUKAS_ENGINE_PROFILE
+        raise UpdateError("Profiled engine has an ambiguous Gaming Services gate.")
+    return profile
 
 
 def _replace_directory(source: Path, destination: Path) -> Path:
@@ -570,8 +625,13 @@ def install_installer_update(
         )
         if progress:
             progress("installer_install", None, None)
-        _validate_archive(archive, "mcbe-gdk-installer", links=False)
-        subprocess.run(["tar", "-xzf", archive, "-C", work], check=True)
+        _validate_archive(
+            archive,
+            "mcbe-gdk-installer",
+            links=False,
+            max_unpacked=MAX_INSTALLER_UNPACKED,
+        )
+        _extract_archive(archive, work)
         source = work / "mcbe-gdk-installer"
         if read_installer_version(source) != release.tag:
             raise UpdateError("Installer archive version does not match its release.")
@@ -595,6 +655,21 @@ def install_installer_update(
             progress("installer_done", None, None)
 
 
+def _apply_game_profile(root: Path) -> None:
+    try:
+        game_dir = Path(
+            (root / "game-dir").read_text(encoding="utf-8").strip()
+        ).expanduser()
+    except OSError:
+        return
+    if not game_dir.is_dir():
+        return
+    try:
+        apply_installed_engine_profile(root, game_dir)
+    except BolError as exc:
+        raise UpdateError(f"Could not apply the engine game profile: {exc}") from exc
+
+
 def install_engine_update(
     release: Release,
     root: Path,
@@ -612,8 +687,13 @@ def install_engine_update(
         )
         if progress:
             progress("engine_install", None, None)
-        _validate_archive(archive, "GDK-Proton-mcbe-gdk", links=True)
-        subprocess.run(["tar", "-xzf", archive, "-C", work], check=True)
+        _validate_archive(
+            archive,
+            "GDK-Proton-mcbe-gdk",
+            links=True,
+            max_unpacked=MAX_ENGINE_UNPACKED,
+        )
+        _extract_archive(archive, work)
         source = work / "GDK-Proton-mcbe-gdk"
         try:
             manifest = json.loads(
@@ -644,6 +724,7 @@ def switch_engine(
     if not engine_is_ready(root, release.tag):
         install_engine_update(release, root, progress)
     root.mkdir(parents=True, exist_ok=True)
+    _apply_game_profile(root)
     (root / ENGINE_SELECTION_FILE).write_text(selected + "\n", encoding="utf-8")
     return release
 
@@ -662,32 +743,22 @@ def install_custom_engine(
         archive = _download_custom_engine(asset, work, progress)
         if progress:
             progress("engine_install", None, None)
-        _validate_custom_engine_archive(archive)
-        source = work / "GDK-Proton-mcbe-gdk"
-        source.mkdir()
-        subprocess.run(
-            [
-                "tar",
-                "--warning=no-unknown-keyword",
-                "-xzf",
-                str(archive),
-                "--strip-components=1",
-                "-C",
-                str(source),
-            ],
-            check=True,
-        )
+        archive_root = _validate_custom_engine_archive(archive)
+        _extract_archive(archive, work)
+        source = work / archive_root
         profile = _apply_custom_engine_profile(source, asset)
         metadata = {
-            "schema": 1,
+            "schema": 2,
             "repository": asset.repo,
             "tag": asset.tag,
             "asset": asset.name,
             "url": asset.url,
             "sha256": asset.sha256,
+            "installed_sha256": _installed_engine_hashes(source),
         }
         if profile:
-            metadata["profile"] = profile
+            metadata["profile"] = profile.identifier
+            metadata["capabilities"] = profile.capabilities()
         metadata_path = source / CUSTOM_ENGINE_METADATA
         metadata_path.unlink(missing_ok=True)
         metadata_path.write_text(
@@ -792,6 +863,7 @@ def _engine_cli(root: Path, selection: str | None) -> int:
     )
     if already_installed:
         root.mkdir(parents=True, exist_ok=True)
+        _apply_game_profile(root)
         selection_file.write_text(selected + "\n", encoding="utf-8")
         identity = (
             f"{custom_asset.repo}@{custom_asset.tag}"
@@ -820,6 +892,7 @@ def _engine_cli(root: Path, selection: str | None) -> int:
         assert release
         install_engine_update(release, root, progress)
         identity = release.tag
+    _apply_game_profile(root)
     selection_file.write_text(selected + "\n", encoding="utf-8")
     print(f"Switched compatibility engine to {identity}.")
     return 0

@@ -22,6 +22,7 @@ from updates import (  # noqa: E402
     CustomEngineAsset,
     UpdateError,
     _apply_custom_engine_profile,
+    _custom_engine_is_ready,
     _download_verified,
     _engine_cli,
     _install_updates_cli,
@@ -341,6 +342,11 @@ class UpdateTests(unittest.TestCase):
             )
             self.assertEqual(metadata["url"], url)
             self.assertEqual(metadata["sha256"], "a" * 64)
+            self.assertEqual(metadata["schema"], 2)
+            self.assertIn("proton", metadata["installed_sha256"])
+            self.assertTrue(_custom_engine_is_ready(root, asset))
+            (destination / "proton").write_bytes(b"tampered")
+            self.assertFalse(_custom_engine_is_ready(root, asset))
 
     def test_lukas_engine_profile_patches_gaming_services_gate(self):
         url = (
@@ -366,7 +372,7 @@ class UpdateTests(unittest.TestCase):
             profile = _apply_custom_engine_profile(source, asset)
             payload = runtime.read_bytes()
 
-        self.assertEqual(profile, "lukas-remote-connect-v1")
+        self.assertEqual(profile.identifier, "lukas-remote-connect-v1")
         self.assertIn(bytes.fromhex("81 fe ff ff ff ff 76 e4"), payload)
         self.assertNotIn(bytes.fromhex("81 fe 4d 11 00 00 76 e4"), payload)
 
@@ -388,7 +394,7 @@ class UpdateTests(unittest.TestCase):
             runtime.write_bytes(b"future runtime without the legacy gate")
             profile = _apply_custom_engine_profile(source, asset)
 
-        self.assertEqual(profile, "lukas-remote-connect-v1")
+        self.assertEqual(profile.identifier, "lukas-remote-connect-v1")
 
     def test_checksum_and_archive_paths_are_verified(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -409,7 +415,25 @@ class UpdateTests(unittest.TestCase):
                 info.size = 1
                 bundle.addfile(info, io.BytesIO(b"x"))
             with self.assertRaises(UpdateError):
-                _validate_archive(unsafe, "mcbe-gdk-installer", links=False)
+                _validate_archive(
+                    unsafe,
+                    "mcbe-gdk-installer",
+                    links=False,
+                    max_unpacked=1024,
+                )
+
+            oversized = root / "oversized.tar.gz"
+            with tarfile.open(oversized, "w:gz") as bundle:
+                info = tarfile.TarInfo("mcbe-gdk-installer/payload")
+                info.size = 2
+                bundle.addfile(info, io.BytesIO(b"xx"))
+            with self.assertRaisesRegex(UpdateError, "size limit"):
+                _validate_archive(
+                    oversized,
+                    "mcbe-gdk-installer",
+                    links=False,
+                    max_unpacked=1,
+                )
 
     def test_verified_download_reports_progress_and_verification(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -489,19 +513,17 @@ class UpdateTests(unittest.TestCase):
             root = Path(temporary)
             selected = release(ENGINE_REPO, "v0.1.8")
 
-            def extract(command, check):
-                self.assertTrue(check)
-                work = Path(command[command.index("-C") + 1])
-                source = work / "GDK-Proton-mcbe-gdk"
-                source.mkdir()
-                (source / "engine-manifest.json").write_text(
-                    json.dumps({"version": selected.tag})
+            archive = root / "engine.tar.gz"
+            manifest_payload = json.dumps({"version": selected.tag}).encode()
+            with tarfile.open(archive, "w:gz") as bundle:
+                info = tarfile.TarInfo(
+                    "GDK-Proton-mcbe-gdk/engine-manifest.json"
                 )
+                info.size = len(manifest_payload)
+                bundle.addfile(info, io.BytesIO(manifest_payload))
 
             with patch(
-                "updates._download_verified", return_value=root / "engine.tar.gz"
-            ), patch("updates._validate_archive"), patch(
-                "updates.subprocess.run", side_effect=extract
+                "updates._download_verified", return_value=archive
             ):
                 install_engine_update(selected, root)
 
@@ -522,12 +544,13 @@ class UpdateTests(unittest.TestCase):
             selected = release(ENGINE_REPO, "v0.1.5")
             with patch("updates.fetch_release", return_value=selected) as fetch, patch(
                 "updates.install_engine_update"
-            ) as install:
+            ) as install, patch("updates._apply_game_profile") as apply_profile:
                 result = switch_engine(root, "0.1.5")
             self.assertEqual(result.tag, "v0.1.5")
             self.assertEqual((root / "engine-release").read_text(), "v0.1.5\n")
             fetch.assert_called_once_with(ENGINE_REPO, "v0.1.5")
             install.assert_called_once_with(selected, root, None)
+            apply_profile.assert_called_once_with(root)
 
             # Persisting the already-installed version never reinstalls.
             (engine / "engine-manifest.json").write_text(

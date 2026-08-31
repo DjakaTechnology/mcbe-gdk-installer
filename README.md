@@ -152,13 +152,17 @@ mcbe-gdk-linux engine \
   'https://github.com/LukasPAH/GDK-Proton-Custom/releases/download/release-10-32-4/GDK-Proton10-32-Custom-4.tar.gz'
 ```
 
-The installer resolves the asset through GitHub's release API, requires and
-verifies GitHub's SHA-256 digest, rejects unsafe archives, and normalizes the
-archive root for the launcher. Releases from the
-`LukasPAH/GDK-Proton-Custom` repository also receive the Lukas configuration:
-Gaming Services compatibility patch when needed, Minecraft identity setup,
-Windows App Runtime workaround, and automatic Microsoft device-code prompt.
-Other external engines remain publisher-managed.
+The installer resolves the asset through GitHub's release API, verifies its
+GitHub-published SHA-256 digest, limits compressed and expanded sizes, rejects
+unsafe archive members, and extracts through one validated tar implementation.
+It records hashes for the transformed runtime files and revalidates them before
+treating an installation as ready.
+
+Releases from `LukasPAH/GDK-Proton-Custom` receive the declarative Lukas
+profile: Gaming Services compatibility patch when needed, transactional
+Minecraft identity setup, reversible Windows App Runtime workaround, and an
+automatic Microsoft device-code prompt supervised with the game process. Other
+external engines remain publisher-managed.
 
 The selection persists across normal updates. For unattended initial installs,
 set `MCBE_GDK_ENGINE_RELEASE=vX.Y.Z`.

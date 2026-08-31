@@ -13,8 +13,10 @@ BedrockOnLinux modules pinned at commit
 
 `mcbe-gdk-linux engine HTTPS_GITHUB_RELEASE_ASSET_URL` accepts `.tar.gz`
 assets from GitHub releases. GitHub must publish a SHA-256 digest for the
-asset. The archive must have one root directory containing executable
-`proton`, `files/bin/wine`, and `files/bin/wineserver` files.
+asset. Archives are limited by compressed size, expanded size, member size,
+member count, and path length, then extracted with Python's validated tar data
+filter. The single archive root must contain executable `proton`,
+`files/bin/wine`, and `files/bin/wineserver` files.
 
 Custom URLs are exact, pinned selections and are not included in automatic
 engine update checks. Selecting `latest` or a `vX.Y.Z` release returns to the
@@ -22,16 +24,25 @@ reviewed `veedy-dev/mcbe-gdk-engine` release stream.
 
 Assets from the `LukasPAH/GDK-Proton-Custom` repository are assigned the Lukas
 profile by repository name. Every selected asset still has its GitHub-published
-SHA-256 digest verified before installation. The profile:
+SHA-256 digest verified before installation. Installer-owned capability
+metadata determines runtime behavior; hashes of the transformed Proton, Wine,
+wineserver, and available xgameruntime files detect later modification.
+
+The Lukas profile:
 
 - patches the engine's Gaming Services version gate during installation;
-- creates or updates `MicrosoftGame.Config` with the required Android identity;
+- transactionally creates or updates `MicrosoftGame.Config` with the required
+  Android identity and keeps original files under `profile/engine-state/`;
 - reversibly disables the incompatible Windows App Runtime bootstrap DLL;
-- watches the engine's `login.json`, validates its Microsoft URL and device
-  code, opens the browser, and displays a copyable sign-in prompt;
-- restores game files when switching back to the reviewed mcbe engine.
+- validates `login.json`, opens the browser, and displays a copyable sign-in
+  code while a Python supervisor owns both the monitor and game process;
+- uses a protected `profile/device-code.txt` fallback when no dialog,
+  notification, or terminal presentation is available;
+- applies or restores game changes during engine switching and again before
+  launch for interrupted-operation recovery.
 
-`mcbe-gdk-linux login`, `logout`, and `status` direct Lukas-profile account
-management to Minecraft because that engine persists its own in-game session.
-Other custom engines remain publisher-managed. The launcher continues applying
-its XCurl payload and CA certificates to every supported engine.
+For custom engines, `mcbe-gdk-linux login`, `logout`, and `status` explain that
+account control is engine-managed and return status 3 rather than reporting a
+state they cannot observe. Other custom engines remain publisher-managed. The
+launcher continues applying its XCurl payload and CA certificates to every
+supported engine.
