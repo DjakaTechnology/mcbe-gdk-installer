@@ -142,8 +142,24 @@ The latest engine release is selected by default. Use
 `mcbe-gdk-linux engine 0.1.5` to switch to `v0.1.5` without reinstalling the
 game, or pick a release from the Compatibility engine selector in the setup
 UI. Versions may include or omit the `v`; use `latest` to resume tracking new
-engine releases. The selection persists across normal updates. For unattended
-initial installs, set `MCBE_GDK_ENGINE_RELEASE=vX.Y.Z`.
+engine releases.
+
+Compatible custom Proton engines can be installed from an HTTPS GitHub release
+asset URL:
+
+```bash
+mcbe-gdk-linux engine \
+  'https://github.com/LukasPAH/GDK-Proton-Custom/releases/download/release-10-32-4/GDK-Proton10-32-Custom-4.tar.gz'
+```
+
+The installer resolves the asset through GitHub's release API, requires and
+verifies GitHub's SHA-256 digest, rejects unsafe archives, and normalizes the
+archive root for the launcher. The selected URL is pinned; automatic engine
+updates remain disabled until a version or `latest` is selected. External
+engine publishers may require additional game or account setup.
+
+The selection persists across normal updates. For unattended initial installs,
+set `MCBE_GDK_ENGINE_RELEASE=vX.Y.Z`.
 
 ## Commands
 
@@ -157,7 +173,7 @@ initial installs, set `MCBE_GDK_ENGINE_RELEASE=vX.Y.Z`.
 | Sign in | `mcbe-gdk-linux login` |
 | Sign out | `mcbe-gdk-linux logout` |
 | Install available updates | `mcbe-gdk-linux update` |
-| Show or switch engine release | `mcbe-gdk-linux engine [VERSION\|latest]` |
+| Show or switch engine | `mcbe-gdk-linux engine [VERSION\|latest\|GITHUB_ASSET_URL]` |
 | Recover after GPU troubleshooting | `mcbe-gdk-linux recover` |
 | Print the `COM_MOJANG` environment command | `mcbe-gdk-linux setup-env` |
 | Remove launchers | `./uninstall.sh` |
