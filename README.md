@@ -154,9 +154,11 @@ mcbe-gdk-linux engine \
 
 The installer resolves the asset through GitHub's release API, requires and
 verifies GitHub's SHA-256 digest, rejects unsafe archives, and normalizes the
-archive root for the launcher. The selected URL is pinned; automatic engine
-updates remain disabled until a version or `latest` is selected. External
-engine publishers may require additional game or account setup.
+archive root for the launcher. Releases from the
+`LukasPAH/GDK-Proton-Custom` repository also receive the Lukas configuration:
+Gaming Services compatibility patch when needed, Minecraft identity setup,
+Windows App Runtime workaround, and automatic Microsoft device-code prompt.
+Other external engines remain publisher-managed.
 
 The selection persists across normal updates. For unattended initial installs,
 set `MCBE_GDK_ENGINE_RELEASE=vX.Y.Z`.

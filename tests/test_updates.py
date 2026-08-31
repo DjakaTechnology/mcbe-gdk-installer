@@ -21,6 +21,7 @@ from updates import (  # noqa: E402
     Release,
     CustomEngineAsset,
     UpdateError,
+    _apply_custom_engine_profile,
     _download_verified,
     _engine_cli,
     _install_updates_cli,
@@ -340,6 +341,54 @@ class UpdateTests(unittest.TestCase):
             )
             self.assertEqual(metadata["url"], url)
             self.assertEqual(metadata["sha256"], "a" * 64)
+
+    def test_lukas_engine_profile_patches_gaming_services_gate(self):
+        url = (
+            "https://github.com/LukasPAH/GDK-Proton-Custom/releases/download/"
+            "release-10-32-4/GDK-Proton10-32-Custom-4.tar.gz"
+        )
+        asset = CustomEngineAsset(
+            repo="LukasPAH/GDK-Proton-Custom",
+            tag="release-10-32-4",
+            name="GDK-Proton10-32-Custom-4.tar.gz",
+            url=url,
+            sha256="4d19774c64451d4f1395dc4c5f4b6e8b5fdbc1ce6c05e29a855f5e0678b8800c",
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary)
+            runtime = source / "files/lib/wine/x86_64-windows/xgameruntime.dll"
+            runtime.parent.mkdir(parents=True)
+            runtime.write_bytes(
+                b"before"
+                + bytes.fromhex("81 fe 4d 11 00 00 76 e4")
+                + b"after"
+            )
+            profile = _apply_custom_engine_profile(source, asset)
+            payload = runtime.read_bytes()
+
+        self.assertEqual(profile, "lukas-remote-connect-v1")
+        self.assertIn(bytes.fromhex("81 fe ff ff ff ff 76 e4"), payload)
+        self.assertNotIn(bytes.fromhex("81 fe 4d 11 00 00 76 e4"), payload)
+
+    def test_lukas_profile_is_selected_by_repository_name(self):
+        asset = CustomEngineAsset(
+            repo="lukaspah/gdk-proton-custom",
+            tag="future-release",
+            name="future-engine.tar.gz",
+            url=(
+                "https://github.com/LukasPAH/GDK-Proton-Custom/releases/"
+                "download/future-release/future-engine.tar.gz"
+            ),
+            sha256="b" * 64,
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary)
+            runtime = source / "files/lib/wine/x86_64-windows/xgameruntime.dll"
+            runtime.parent.mkdir(parents=True)
+            runtime.write_bytes(b"future runtime without the legacy gate")
+            profile = _apply_custom_engine_profile(source, asset)
+
+        self.assertEqual(profile, "lukas-remote-connect-v1")
 
     def test_checksum_and_archive_paths_are_verified(self):
         with tempfile.TemporaryDirectory() as temporary:

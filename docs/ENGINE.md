@@ -20,7 +20,18 @@ Custom URLs are exact, pinned selections and are not included in automatic
 engine update checks. Selecting `latest` or a `vX.Y.Z` release returns to the
 reviewed `veedy-dev/mcbe-gdk-engine` release stream.
 
-Engine-specific setup remains the publisher's responsibility. The launcher
-continues installing its XCurl payload and CA certificates, but the built-in
-`mcbe-gdk-linux login` preauthentication contract is only guaranteed for the
-reviewed engine.
+Assets from the `LukasPAH/GDK-Proton-Custom` repository are assigned the Lukas
+profile by repository name. Every selected asset still has its GitHub-published
+SHA-256 digest verified before installation. The profile:
+
+- patches the engine's Gaming Services version gate during installation;
+- creates or updates `MicrosoftGame.Config` with the required Android identity;
+- reversibly disables the incompatible Windows App Runtime bootstrap DLL;
+- watches the engine's `login.json`, validates its Microsoft URL and device
+  code, opens the browser, and displays a copyable sign-in prompt;
+- restores game files when switching back to the reviewed mcbe engine.
+
+`mcbe-gdk-linux login`, `logout`, and `status` direct Lukas-profile account
+management to Minecraft because that engine persists its own in-game session.
+Other custom engines remain publisher-managed. The launcher continues applying
+its XCurl payload and CA certificates to every supported engine.

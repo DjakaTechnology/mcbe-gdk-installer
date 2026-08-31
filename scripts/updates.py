@@ -27,6 +27,8 @@ CUSTOM_ENGINE_METADATA = ".mcbe-gdk-engine.json"
 API_VERSION = "2022-11-28"
 MAX_RELEASE_JSON = 1_000_000
 MAX_RELEASE_LIST_JSON = 10_000_000
+LUKAS_ENGINE_PROFILE = "lukas-remote-connect-v1"
+LUKAS_ENGINE_REPO = "LukasPAH/GDK-Proton-Custom"
 ProgressCallback = Callable[[str, int | None, int | None], None]
 
 
@@ -275,7 +277,10 @@ def _read_custom_engine_metadata(root: Path) -> dict[str, str] | None:
             not isinstance(data.get(key), str) or not data[key] for key in required
         ):
             return None
-        return {key: data[key] for key in required}
+        result = {key: data[key] for key in required}
+        if isinstance(data.get("profile"), str) and data["profile"]:
+            result["profile"] = data["profile"]
+        return result
     except (OSError, TypeError, ValueError):
         return None
 
@@ -496,6 +501,44 @@ def _validate_custom_engine_archive(archive: Path) -> str:
     return archive_root
 
 
+def _custom_engine_is_ready(root: Path, asset: CustomEngineAsset) -> bool:
+    metadata = _read_custom_engine_metadata(root)
+    engine = root / "engine/GDK-Proton-mcbe-gdk"
+    required = (
+        engine / "proton",
+        engine / "files/bin/wine",
+        engine / "files/bin/wineserver",
+    )
+    return bool(
+        metadata
+        and metadata["url"] == asset.url
+        and metadata["sha256"] == asset.sha256
+        and all(path.is_file() and os.access(path, os.X_OK) for path in required)
+    )
+
+
+def _apply_custom_engine_profile(
+    source: Path, asset: CustomEngineAsset
+) -> str | None:
+    if asset.repo.casefold() != LUKAS_ENGINE_REPO.casefold():
+        return None
+
+    runtime = source / "files/lib/wine/x86_64-windows/xgameruntime.dll"
+    try:
+        payload = runtime.read_bytes()
+    except OSError as exc:
+        raise UpdateError("Lukas engine is missing xgameruntime.dll.") from exc
+    version_gate = bytes.fromhex("81 fe 4d 11 00 00 76 e4")
+    patched_gate = bytes.fromhex("81 fe ff ff ff ff 76 e4")
+    unpatched_count = payload.count(version_gate)
+    patched_count = payload.count(patched_gate)
+    if unpatched_count == 1 and patched_count == 0:
+        runtime.write_bytes(payload.replace(version_gate, patched_gate, 1))
+    elif unpatched_count > 1 or (unpatched_count and patched_count):
+        raise UpdateError("Lukas engine has an ambiguous Gaming Services gate.")
+    return LUKAS_ENGINE_PROFILE
+
+
 def _replace_directory(source: Path, destination: Path) -> Path:
     backup = destination.with_name(f"{destination.name}.previous")
     if backup.exists():
@@ -603,6 +646,8 @@ def switch_engine(
     root.mkdir(parents=True, exist_ok=True)
     (root / ENGINE_SELECTION_FILE).write_text(selected + "\n", encoding="utf-8")
     return release
+
+
 def install_custom_engine(
     asset: CustomEngineAsset,
     root: Path,
@@ -632,6 +677,7 @@ def install_custom_engine(
             ],
             check=True,
         )
+        profile = _apply_custom_engine_profile(source, asset)
         metadata = {
             "schema": 1,
             "repository": asset.repo,
@@ -640,6 +686,8 @@ def install_custom_engine(
             "url": asset.url,
             "sha256": asset.sha256,
         }
+        if profile:
+            metadata["profile"] = profile
         metadata_path = source / CUSTOM_ENGINE_METADATA
         metadata_path.unlink(missing_ok=True)
         metadata_path.write_text(
@@ -647,8 +695,11 @@ def install_custom_engine(
             encoding="utf-8",
         )
         destination = engine_parent / "GDK-Proton-mcbe-gdk"
-        backup = _replace_directory(source, destination)
-        shutil.rmtree(backup)
+        if destination.exists():
+            backup = _replace_directory(source, destination)
+            shutil.rmtree(backup)
+        else:
+            source.rename(destination)
         if progress:
             progress("engine_done", None, None)
 
@@ -735,15 +786,9 @@ def _engine_cli(root: Path, selection: str | None) -> int:
         fetch_custom_engine(selected) if selected.startswith("https://") else None
     )
     release = None if custom_asset else fetch_release(ENGINE_REPO, selected)
-    custom_metadata = _read_custom_engine_metadata(root)
     already_installed = (
-        bool(
-            custom_asset
-            and custom_metadata
-            and custom_metadata["url"] == custom_asset.url
-            and custom_metadata["sha256"] == custom_asset.sha256
-        )
-        or bool(release and current == release.tag)
+        bool(custom_asset and _custom_engine_is_ready(root, custom_asset))
+        or bool(release and engine_is_ready(root, release.tag))
     )
     if already_installed:
         root.mkdir(parents=True, exist_ok=True)

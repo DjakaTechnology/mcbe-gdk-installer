@@ -7,6 +7,7 @@ export PYTHONPATH="$ROOT/lib"
 export PROTON_USE_WOW64=1
 CONTENT="$(cat "$ROOT/game-dir" 2>/dev/null || true)"
 GAME="$CONTENT/Minecraft.Windows.exe"
+LOGIN_REQUEST="$(dirname "$CONTENT")/login.json"
 ENGINE="$ROOT/engine/GDK-Proton-mcbe-gdk"
 UMU="$BOL_HOME/umu/umu-run"
 RUNTIME="$ROOT/lib/runtime.py"
@@ -199,15 +200,31 @@ if [[ ! "$gpu_token" =~ ^[0-9a-f]{32}$ ]]; then
   notify 'MCBE GDK Installer safety check failed' "See $LOG"
   exit 1
 fi
+login_monitor_pid=""
+cleanup_login_monitor() {
+  if [[ -z "$login_monitor_pid" ]]; then
+    return
+  fi
+  kill "$login_monitor_pid" 2>/dev/null || true
+  wait "$login_monitor_pid" 2>/dev/null || true
+  login_monitor_pid=""
+}
 cleanup_marker() {
   python3 "$RUNTIME" gpu-disarm "$gpu_token" >> "$LOG" 2>&1 || true
 }
 cleanup_launch() {
+  cleanup_login_monitor
   cleanup_marker
   cleanup_pid
 }
 trap cleanup_launch EXIT
 trap 'exit 130' HUP INT TERM
+
+if [[ "$(python3 "$RUNTIME" engine-profile 2>> "$LOG")" == \
+      "lukas-remote-connect-v1" ]]; then
+  python3 "$RUNTIME" login-monitor "$LOGIN_REQUEST" >> "$LOG" 2>&1 &
+  login_monitor_pid=$!
+fi
 
 (cd "$CONTENT" && python3 "$UMU" "$GAME" "$@") >> "$LOG" 2>&1
 rc=$?
